@@ -1,0 +1,44 @@
+# AI
+/.agents
+/.claude
+/skills
+/skills-lock.json
+
+# Local
+fsb.zip
+*.zip
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+**/.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# PHP / Composer
+# Installed packages — restore with: composer install
+super-sheep-copy/vendor/
+
+# PHPUnit
+# Test-result cache written after each run (machine-specific)
+super-sheep-copy/.phpunit.result.cache
+# Code coverage reports (generated with --coverage-html)
+super-sheep-copy/tests/coverage/
