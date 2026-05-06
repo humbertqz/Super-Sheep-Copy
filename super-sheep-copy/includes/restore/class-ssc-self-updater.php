@@ -144,7 +144,7 @@ class SSC_Self_Updater {
 		$pending = $raw ? json_decode( $raw, true ) : null;
 
 		// Delete file first — prevents infinite loop if swap fails mid-way.
-		@unlink( $pending_file ); // phpcs:ignore WordPress.PHP.NoSilencedErrors
+		@unlink( $pending_file ); // phpcs:ignore WordPress.PHP.NoSilencedErrors, WordPress.WP.AlternativeFunctions.unlink_unlink
 
 		if ( ! $pending || ! is_array( $pending ) ) {
 			return;
@@ -279,7 +279,14 @@ class SSC_Self_Updater {
 
 			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
 			if ( false === file_put_contents( $dest, $content ) ) {
-				return new WP_Error( 'staging_write_failed', sprintf( __( 'No se pudo escribir archivo de staging: %s', 'super-sheep-copy' ), $rel ) );
+				return new WP_Error(
+				'staging_write_failed',
+				sprintf(
+					/* translators: %s: relative file path */
+					__( 'No se pudo escribir archivo de staging: %s', 'super-sheep-copy' ),
+					$rel
+				)
+			);
 			}
 
 			$extracted = true;

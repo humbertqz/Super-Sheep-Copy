@@ -142,8 +142,8 @@ $exceeds_server   = $plugin_max_mb > $server_max_mb;
 							<?php
 							echo esc_html(
 								sprintf(
-									/* translators: %s: server limit */
-									__( 'El valor configurado supera el límite del servidor (%s). El límite efectivo será %s.', 'super-sheep-copy' ),
+									/* translators: 1: configured limit, 2: effective limit */
+									__( 'El valor configurado supera el límite del servidor (%1$s). El límite efectivo será %2$s.', 'super-sheep-copy' ),
 									size_format( $server_max_bytes ),
 									size_format( $effective_mb * MB_IN_BYTES )
 								)

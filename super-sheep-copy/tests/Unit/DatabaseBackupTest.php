@@ -1,4 +1,5 @@
 <?php
+
 /**
  * Tests para SSC_Database_Backup — build_insert_block y detección numérica.
  *
@@ -7,7 +8,12 @@
 
 declare( strict_types=1 );
 
+
 namespace SSC\Tests\Unit;
+
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
 
 /**
  * @covers \SSC_Database_Backup

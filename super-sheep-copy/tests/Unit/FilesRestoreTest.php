@@ -1,4 +1,5 @@
 <?php
+
 /**
  * Tests para SSC_Files_Restore — extracción y Zip Slip.
  *
@@ -7,7 +8,12 @@
 
 declare( strict_types=1 );
 
+
 namespace SSC\Tests\Unit;
+
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
 
 /**
  * @covers \SSC_Files_Restore
@@ -31,7 +37,7 @@ class FilesRestoreTest extends TestCase {
         $zip_path = $this->work_dir . '/backup.zip';
         $tmp_dir  = $this->work_dir . '/tmp';
         $target   = $this->work_dir . '/site';
-        @mkdir( $target, 0755, true );
+        @mkdir( $target, 0755, true ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_mkdir
 
         $this->create_test_zip( $zip_path, [
             'wp-content/themes/my-theme/style.css' => "/* Theme */\nbody {}",
@@ -55,7 +61,7 @@ class FilesRestoreTest extends TestCase {
         $zip_path = $this->work_dir . '/backup.zip';
         $tmp_dir  = $this->work_dir . '/tmp';
         $target   = $this->work_dir . '/site';
-        @mkdir( $target, 0755, true );
+        @mkdir( $target, 0755, true ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_mkdir
 
         $this->create_test_zip( $zip_path, [
             'manifest.json' => '{"key":"val"}',
@@ -76,7 +82,7 @@ class FilesRestoreTest extends TestCase {
         $zip_path = $this->work_dir . '/backup.zip';
         $tmp_dir  = $this->work_dir . '/tmp';
         $target   = $this->work_dir . '/site';
-        @mkdir( $target, 0755, true );
+        @mkdir( $target, 0755, true ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_mkdir
 
         $this->create_test_zip( $zip_path, [
             'wp-config.php' => '<?php define("DB_NAME","old");',
@@ -95,7 +101,7 @@ class FilesRestoreTest extends TestCase {
         $zip_path = $this->work_dir . '/backup.zip';
         $tmp_dir  = $this->work_dir . '/tmp';
         $target   = $this->work_dir . '/site';
-        @mkdir( $target, 0755, true );
+        @mkdir( $target, 0755, true ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_mkdir
 
         $this->create_test_zip( $zip_path, [
             'wp-config.php' => '<?php define("DB_NAME","newdb");',

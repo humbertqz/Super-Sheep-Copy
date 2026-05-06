@@ -95,7 +95,7 @@ class SSC_Filesystem {
 		if ( $recursive && is_dir( $path ) ) {
 			return self::recursive_delete( $path );
 		}
-		return @unlink( $path ); // phpcs:ignore WordPress.PHP.NoSilencedErrors
+		return @unlink( $path ); // phpcs:ignore WordPress.PHP.NoSilencedErrors, WordPress.WP.AlternativeFunctions.unlink_unlink
 	}
 
 	/**
@@ -114,11 +114,11 @@ class SSC_Filesystem {
 		);
 		foreach ( $items as $item ) {
 			if ( $item->isDir() ) {
-				@rmdir( $item->getRealPath() ); // phpcs:ignore WordPress.PHP.NoSilencedErrors
+				@rmdir( $item->getRealPath() ); // phpcs:ignore WordPress.PHP.NoSilencedErrors, WordPress.WP.AlternativeFunctions.file_system_operations_rmdir
 			} else {
-				@unlink( $item->getRealPath() ); // phpcs:ignore WordPress.PHP.NoSilencedErrors
+				@unlink( $item->getRealPath() ); // phpcs:ignore WordPress.PHP.NoSilencedErrors, WordPress.WP.AlternativeFunctions.unlink_unlink
 			}
 		}
-		return @rmdir( $dir ); // phpcs:ignore WordPress.PHP.NoSilencedErrors
+		return @rmdir( $dir ); // phpcs:ignore WordPress.PHP.NoSilencedErrors, WordPress.WP.AlternativeFunctions.file_system_operations_rmdir
 	}
 }

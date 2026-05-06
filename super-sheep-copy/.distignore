@@ -1,0 +1,10 @@
+# Dev-only files — excluded from the WordPress.org distribution zip.
+tests/
+vendor/
+composer.json
+composer.lock
+phpunit.xml
+patchwork.json
+.distignore
+.gitignore
+.phpunit.result.cache

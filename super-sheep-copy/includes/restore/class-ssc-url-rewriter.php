@@ -167,7 +167,7 @@ class SSC_URL_Rewriter {
 		$offset = 0;
 
 		do {
-			// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL, WordPress.DB.PreparedSQLPlaceholders
+			// phpcs:disable WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL, WordPress.DB.PreparedSQLPlaceholders
 			$rows = $wpdb->get_results(
 				$wpdb->prepare(
 					"SELECT `%1s`, `%1s` FROM `%1s` ORDER BY `%1s` LIMIT %d OFFSET %d",
@@ -180,6 +180,7 @@ class SSC_URL_Rewriter {
 				),
 				ARRAY_A
 			);
+			// phpcs:enable WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL, WordPress.DB.PreparedSQLPlaceholders
 
 			foreach ( (array) $rows as $row ) {
 				$original = $row[ $value_col ];
@@ -229,14 +230,14 @@ class SSC_URL_Rewriter {
 		$use_raw = $dbh instanceof \mysqli;
 
 		if ( $use_raw ) {
-			$esc_val = mysqli_real_escape_string( $dbh, $new_value );
-			$esc_id  = mysqli_real_escape_string( $dbh, (string) $id_value );
-			mysqli_query( $dbh, "UPDATE `{$table}` SET `{$value_col}` = '{$esc_val}' WHERE `{$id_col}` = '{$esc_id}'" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			$esc_val = mysqli_real_escape_string( $dbh, $new_value ); // phpcs:ignore WordPress.DB.RestrictedFunctions.mysql_mysqli_real_escape_string
+			$esc_id  = mysqli_real_escape_string( $dbh, (string) $id_value ); // phpcs:ignore WordPress.DB.RestrictedFunctions.mysql_mysqli_real_escape_string
+			mysqli_query( $dbh, "UPDATE `{$table}` SET `{$value_col}` = '{$esc_val}' WHERE `{$id_col}` = '{$esc_id}'" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.RestrictedFunctions.mysql_mysqli_query, PluginCheck.Security.DirectDB.UnescapedDBParameter
 		} else {
 			// Fallback: esc_sql() + $wpdb->query() — bypasses prepare()/placeholder_escape().
 			$esc_val = esc_sql( $new_value );
 			$esc_id  = esc_sql( (string) $id_value );
-			$wpdb->query( "UPDATE `{$table}` SET `{$value_col}` = '{$esc_val}' WHERE `{$id_col}` = '{$esc_id}'" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL
+			$wpdb->query( "UPDATE `{$table}` SET `{$value_col}` = '{$esc_val}' WHERE `{$id_col}` = '{$esc_id}'" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL, PluginCheck.Security.DirectDB.UnescapedDBParameter
 		}
 	}
 

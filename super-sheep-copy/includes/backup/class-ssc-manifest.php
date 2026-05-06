@@ -137,7 +137,11 @@ class SSC_Manifest {
 			if ( empty( $data[ $key ] ) ) {
 				return new WP_Error(
 					'manifest_missing_field',
-					sprintf( __( 'manifest.json no contiene el campo requerido: %s', 'super-sheep-copy' ), $key )
+					sprintf(
+					/* translators: %s: required field name */
+					__( 'manifest.json no contiene el campo requerido: %s', 'super-sheep-copy' ),
+					$key
+				)
 				);
 			}
 		}

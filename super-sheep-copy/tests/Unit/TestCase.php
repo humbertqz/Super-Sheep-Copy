@@ -1,4 +1,5 @@
 <?php
+
 /**
  * Clase base para todos los tests del plugin.
  *
@@ -7,7 +8,12 @@
 
 declare( strict_types=1 );
 
+
 namespace SSC\Tests\Unit;
+
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
 
 use Brain\Monkey;
 use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
@@ -72,7 +78,7 @@ abstract class TestCase extends PHPUnitTestCase {
         Monkey\Functions\stubs( [
             'wp_parse_args'    => static fn( $a, $b ) => array_merge( (array) $b, (array) $a ),
             'is_wp_error'      => static fn( $v ) => $v instanceof \WP_Error,
-            'wp_mkdir_p'       => static fn( $dir ) => @mkdir( $dir, 0755, true ) || is_dir( $dir ),
+            'wp_mkdir_p'       => static fn( $dir ) => @mkdir( $dir, 0755, true ) || is_dir( $dir ), // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_mkdir
             'sanitize_file_name' => static fn( $v ) => preg_replace( '/[^a-zA-Z0-9._-]/', '-', $v ),
             'size_format'      => static fn( $bytes ) => round( $bytes / 1048576, 2 ) . ' MB',
             'get_bloginfo'     => static fn( $show ) => '6.5',
@@ -84,7 +90,7 @@ abstract class TestCase extends PHPUnitTestCase {
             'wp_get_current_user' => static fn() => (object) [ 'ID' => 1, 'user_login' => 'admin' ],
             'get_current_user_id' => static fn() => 1,
             'wp_raise_memory_limit' => static fn() => '256M',
-            'wp_parse_url'          => static fn( $url, $component = -1 ) => parse_url( $url, $component ),
+            'wp_parse_url'          => static fn( $url, $component = -1 ) => parse_url( $url, $component ), // phpcs:ignore WordPress.WP.AlternativeFunctions.parse_url_parse_url
             'site_url'              => static fn( $path = '' ) => 'https://example.com' . $path,
         ] );
     }
@@ -111,7 +117,7 @@ abstract class TestCase extends PHPUnitTestCase {
      */
     protected function tmp_dir( string $suffix = '' ): string {
         $dir = sys_get_temp_dir() . '/ssc_test_' . uniqid() . $suffix;
-        @mkdir( $dir, 0755, true );
+        @mkdir( $dir, 0755, true ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_mkdir
         return $dir;
     }
 
@@ -127,8 +133,8 @@ abstract class TestCase extends PHPUnitTestCase {
             \RecursiveIteratorIterator::CHILD_FIRST
         );
         foreach ( $it as $item ) {
-            $item->isDir() ? @rmdir( $item->getPathname() ) : @unlink( $item->getPathname() );
+            $item->isDir() ? @rmdir( $item->getPathname() ) : @unlink( $item->getPathname() ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_rmdir, WordPress.WP.AlternativeFunctions.unlink_unlink
         }
-        @rmdir( $dir );
+        @rmdir( $dir ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_rmdir
     }
 }

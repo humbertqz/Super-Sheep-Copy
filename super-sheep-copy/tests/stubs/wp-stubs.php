@@ -4,6 +4,10 @@
  * Se cargan antes que las clases del plugin.
  */
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Stub de $wpdb para evitar "Call to a member function on null" en SSC_Logger.
  * Se asigna al global antes de cargar las clases del plugin.
@@ -62,11 +66,11 @@ if ( ! class_exists( 'WP_Filesystem_Base' ) ) {
                     RecursiveIteratorIterator::CHILD_FIRST
                 );
                 foreach ( $it as $item ) {
-                    $item->isDir() ? @rmdir( $item->getPathname() ) : @unlink( $item->getPathname() );
+                    $item->isDir() ? @rmdir( $item->getPathname() ) : @unlink( $item->getPathname() ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_rmdir, WordPress.WP.AlternativeFunctions.unlink_unlink
                 }
-                return @rmdir( $path );
+                return @rmdir( $path ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_rmdir
             }
-            return @unlink( $path );
+            return @unlink( $path ); // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
         }
         public function put_contents( string $path, string $content, int $mode = 0 ): bool {
             return false !== file_put_contents( $path, $content );

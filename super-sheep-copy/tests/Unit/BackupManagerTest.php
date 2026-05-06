@@ -1,4 +1,5 @@
 <?php
+
 /**
  * Tests para SSC_Backup_Manager — lock, espacio en disco, nombre de archivo.
  *
@@ -7,7 +8,12 @@
 
 declare( strict_types=1 );
 
+
 namespace SSC\Tests\Unit;
+
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
 
 use Brain\Monkey\Functions;
 
@@ -135,7 +141,7 @@ class BackupManagerTest extends TestCase {
         // Crear estructura temporal: wp-content con un archivo normal + directorio de respaldos.
         $wc_dir      = $this->tmp_dir( '_wc' );
         $backup_dir  = $wc_dir . '/uploads/ssc-backups';
-        @mkdir( $backup_dir, 0755, true );
+        @mkdir( $backup_dir, 0755, true ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_mkdir
 
         // Archivo normal (debe contarse).
         file_put_contents( $wc_dir . '/normal.txt', str_repeat( 'x', 1000 ) );

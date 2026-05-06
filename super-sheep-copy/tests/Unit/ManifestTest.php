@@ -1,4 +1,5 @@
 <?php
+
 /**
  * Tests para SSC_Manifest.
  *
@@ -7,7 +8,12 @@
 
 declare( strict_types=1 );
 
+
 namespace SSC\Tests\Unit;
+
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
 
 /**
  * @covers \SSC_Manifest

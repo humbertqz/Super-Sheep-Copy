@@ -130,15 +130,19 @@ class SSC_Database_Restore {
 
 				$ok = $this->exec_statement( $stmt, $raw_dbh, $use_raw_mysqli );
 				if ( false === $ok ) {
-					$error_msg = ( $use_raw_mysqli && $raw_dbh ) ? mysqli_error( $raw_dbh ) : $wpdb->last_error;
+					$error_msg = ( $use_raw_mysqli && $raw_dbh ) ? mysqli_error( $raw_dbh ) : $wpdb->last_error; // phpcs:ignore WordPress.DB.RestrictedFunctions.mysql_mysqli_error
 					SSC_Logger::error(
 						'db_restore',
 						sprintf( 'Error SQL en sentencia %d: %s', $this->statement_count + 1, $error_msg )
 					);
-					fclose( $handle );
+					fclose( $handle ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose
 					return new WP_Error(
 						'sql_query_failed',
-						sprintf( __( 'Error SQL: %s', 'super-sheep-copy' ), $error_msg )
+						sprintf(
+						/* translators: %s: SQL error message */
+						__( 'Error SQL: %s', 'super-sheep-copy' ),
+						$error_msg
+					)
 					);
 				}
 
@@ -153,7 +157,7 @@ class SSC_Database_Restore {
 			++$this->statement_count;
 		}
 
-		fclose( $handle );
+		fclose( $handle ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose
 
 		SSC_Logger::info( 'db_restore', sprintf( 'Importación completada. Sentencias ejecutadas: %d', $this->statement_count ) );
 		return true;
@@ -185,12 +189,20 @@ class SSC_Database_Restore {
 		global $wpdb;
 
 		if ( $use_raw_mysqli && $raw_dbh ) {
-			$ok = mysqli_query( $raw_dbh, $stmt ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			$ok = mysqli_query( $raw_dbh, $stmt ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.RestrictedFunctions.mysql_mysqli_query
 			return ( false === $ok ) ? false : true;
 		}
 
-		// Fallback: $wpdb->query() — puede corromper valores con '%'.
-		$result = $wpdb->query( $stmt ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL
+		/*
+		 * Fallback when $wpdb->dbh is not a mysqli instance.
+		 * $stmt is raw SQL reconstructed line-by-line from a trusted backup file
+		 * produced by this same plugin. It cannot go through $wpdb->prepare()
+		 * because prepare() applies placeholder_escape(), which corrupts any '%'
+		 * that appears inside SQL string values (e.g. permalink_structure = '/%year%/').
+		 * There is no user-supplied input in $stmt at this point.
+		 */
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter
+		$result = $wpdb->query( $stmt );
 		return $result;
 	}
 

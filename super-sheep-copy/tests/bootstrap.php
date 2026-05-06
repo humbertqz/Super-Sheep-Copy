@@ -8,6 +8,11 @@
 
 declare( strict_types=1 );
 
+// ── Constantes de WordPress — deben definirse antes de cargar los stubs ──────
+if ( ! defined( 'ABSPATH' ) ) {
+    define( 'ABSPATH', sys_get_temp_dir() . '/ssc-test-abspath/' );
+}
+
 // ── Autoloader de Composer ────────────────────────────────────────────────────
 require_once __DIR__ . '/../vendor/autoload.php';
 
@@ -20,13 +25,8 @@ define( 'SSC_MIN_PHP',     '7.4' );
 define( 'SSC_MIN_WP',      '6.0' );
 define( 'SSC_PLUGIN_FILE', dirname( __DIR__ ) . '/super-sheep-copy.php' );
 define( 'SSC_PLUGIN_DIR',  dirname( __DIR__ ) . '/' );
-define( 'SSC_PLUGIN_URL',  'http://localhost/wp-content/plugins/ssc/' );
+define( 'SSC_PLUGIN_URL',  'https://example.com/wp-content/plugins/ssc/' );
 define( 'SSC_BACKUPS_DIR', sys_get_temp_dir() . '/ssc-test-backups/' );
-
-// ── Constantes de WordPress usadas por las clases ─────────────────────────────
-if ( ! defined( 'ABSPATH' ) ) {
-    define( 'ABSPATH', sys_get_temp_dir() . '/ssc-test-abspath/' );
-}
 if ( ! defined( 'WP_CONTENT_DIR' ) ) {
     define( 'WP_CONTENT_DIR', ABSPATH . 'wp-content' );
 }
@@ -40,9 +40,9 @@ if ( ! defined( 'HOUR_IN_SECONDS' ) ) { define( 'HOUR_IN_SECONDS', 3600 ); }
 if ( ! defined( 'FS_CHMOD_FILE' ) )   { define( 'FS_CHMOD_FILE', 0644 ); }
 
 // Crear directorios temporales necesarios para las pruebas.
-@mkdir( SSC_BACKUPS_DIR, 0755, true );
-@mkdir( ABSPATH, 0755, true );
-@mkdir( WP_CONTENT_DIR, 0755, true );
+@mkdir( SSC_BACKUPS_DIR, 0755, true ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_mkdir
+@mkdir( ABSPATH, 0755, true ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_mkdir
+@mkdir( WP_CONTENT_DIR, 0755, true ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_mkdir
 
 // ── Carga de clases del plugin (orden de dependencias) ────────────────────────
 $plugin_includes = [

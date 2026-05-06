@@ -60,7 +60,7 @@ class SSC_Restore_Manager {
 		$this->job_id = $job_id ?: $this->generate_job_id();
 
 		wp_raise_memory_limit( 'admin' );
-		@set_time_limit( 0 ); // phpcs:ignore WordPress.PHP.NoSilencedErrors
+		@set_time_limit( 0 ); // phpcs:ignore WordPress.PHP.NoSilencedErrors, Squiz.PHP.DiscouragedFunctions.Discouraged
 
 		// Verificar que solo hay una restauración en curso.
 		if ( get_transient( 'ssc_restore_running' ) ) {
@@ -369,7 +369,7 @@ class SSC_Restore_Manager {
 		// Calcular RewriteBase desde el path de siteurl.
 		//   https://example.com/           → /
 		//   https://example.com/wordpress/ → /wordpress/
-		$site_path = parse_url( $site_url, PHP_URL_PATH );
+		$site_path = wp_parse_url( $site_url, PHP_URL_PATH );
 		if ( ! $site_path || '/' === $site_path ) {
 			$site_path = '/';
 		} else {
@@ -451,7 +451,7 @@ class SSC_Restore_Manager {
 	private function disable_maintenance_mode(): void {
 		$file = ABSPATH . '.maintenance';
 		if ( file_exists( $file ) ) {
-			@unlink( $file ); // phpcs:ignore WordPress.PHP.NoSilencedErrors
+			@unlink( $file ); // phpcs:ignore WordPress.PHP.NoSilencedErrors, WordPress.WP.AlternativeFunctions.unlink_unlink
 		}
 		SSC_Logger::info( 'restore_manager', 'Modo mantenimiento desactivado.' );
 	}
@@ -537,12 +537,12 @@ class SSC_Restore_Manager {
 		$sql = "SELECT option_id, option_name, option_value FROM `{$wpdb->options}` WHERE option_value LIKE '%{%'";
 
 		if ( $use_raw ) {
-			$result = mysqli_query( $dbh, $sql ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			$result = mysqli_query( $dbh, $sql ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.RestrictedFunctions.mysql_mysqli_query
 			if ( ! $result ) {
 				return;
 			}
 			$rows = array();
-			while ( $row = mysqli_fetch_assoc( $result ) ) { // phpcs:ignore WordPress.CodeAnalysis.AssignmentInCondition
+			while ( $row = mysqli_fetch_assoc( $result ) ) { // phpcs:ignore WordPress.CodeAnalysis.AssignmentInCondition, WordPress.DB.RestrictedFunctions.mysql_mysqli_fetch_assoc
 				$rows[] = $row;
 			}
 		} else {
@@ -572,13 +572,13 @@ class SSC_Restore_Manager {
 			);
 
 			if ( $use_raw ) {
-				$esc_val = mysqli_real_escape_string( $dbh, $fixed );
-				$esc_id  = mysqli_real_escape_string( $dbh, (string) $row['option_id'] );
-				mysqli_query( $dbh, "UPDATE `{$wpdb->options}` SET option_value = '{$esc_val}' WHERE option_id = '{$esc_id}'" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+				$esc_val = mysqli_real_escape_string( $dbh, $fixed ); // phpcs:ignore WordPress.DB.RestrictedFunctions.mysql_mysqli_real_escape_string
+				$esc_id  = mysqli_real_escape_string( $dbh, (string) $row['option_id'] ); // phpcs:ignore WordPress.DB.RestrictedFunctions.mysql_mysqli_real_escape_string
+				mysqli_query( $dbh, "UPDATE `{$wpdb->options}` SET option_value = '{$esc_val}' WHERE option_id = '{$esc_id}'" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.RestrictedFunctions.mysql_mysqli_query
 			} else {
 				$esc_val = esc_sql( $fixed );
 				$esc_id  = esc_sql( (string) $row['option_id'] );
-				$wpdb->query( "UPDATE `{$wpdb->options}` SET option_value = '{$esc_val}' WHERE option_id = '{$esc_id}'" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL
+				$wpdb->query( "UPDATE `{$wpdb->options}` SET option_value = '{$esc_val}' WHERE option_id = '{$esc_id}'" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL, PluginCheck.Security.DirectDB.UnescapedDBParameter
 			}
 
 			++$count;

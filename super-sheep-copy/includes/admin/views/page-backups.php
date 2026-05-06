@@ -29,19 +29,19 @@ $last_str = '';
 if ( $last_mtime > 0 ) {
 	$diff = time() - $last_mtime;
 	if ( $diff < 60 ) {
-		$last_str = esc_html__( 'Hace un momento', 'super-sheep-copy' );
+		$last_str = __( 'Hace un momento', 'super-sheep-copy' );
 	} elseif ( $diff < 3600 ) {
 		/* translators: %d: minutes */
-		$last_str = esc_html( sprintf( __( 'Hace %d min', 'super-sheep-copy' ), intdiv( $diff, 60 ) ) );
+		$last_str = sprintf( __( 'Hace %d min', 'super-sheep-copy' ), intdiv( $diff, 60 ) );
 	} elseif ( $diff < 86400 ) {
 		/* translators: %d: hours */
-		$last_str = esc_html( sprintf( __( 'Hace %dh', 'super-sheep-copy' ), intdiv( $diff, 3600 ) ) );
+		$last_str = sprintf( __( 'Hace %dh', 'super-sheep-copy' ), intdiv( $diff, 3600 ) );
 	} else {
 		/* translators: %d: days */
-		$last_str = esc_html( sprintf( __( 'Hace %d días', 'super-sheep-copy' ), intdiv( $diff, 86400 ) ) );
+		$last_str = sprintf( __( 'Hace %d días', 'super-sheep-copy' ), intdiv( $diff, 86400 ) );
 	}
 } else {
-	$last_str = esc_html__( 'Nunca', 'super-sheep-copy' );
+	$last_str = __( 'Nunca', 'super-sheep-copy' );
 }
 ?>
 <div class="wrap ssc-wrap ssc-plugin-page ssc-backups-page">
@@ -126,7 +126,7 @@ if ( $last_mtime > 0 ) {
 			<span class="ssc-stat-label"><?php esc_html_e( 'Espacio total', 'super-sheep-copy' ); ?></span>
 		</div>
 		<div class="ssc-stat-card">
-			<span class="ssc-stat-value"><?php echo $last_str; // phpcs:ignore WordPress.Security.EscapeOutput — already escaped above ?></span>
+			<span class="ssc-stat-value"><?php echo esc_html( $last_str ); ?></span>
 			<span class="ssc-stat-label"><?php esc_html_e( 'Último respaldo', 'super-sheep-copy' ); ?></span>
 		</div>
 	</div>

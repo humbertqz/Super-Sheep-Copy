@@ -106,7 +106,7 @@ class SSC_Admin_Ajax {
 			$this->send_json_clean( false, array( 'message' => __( 'Ya hay un respaldo en curso. Inténtalo de nuevo en unos minutos.', 'super-sheep-copy' ) ) );
 		}
 
-		$label  = isset( $_POST['label'] ) ? sanitize_text_field( wp_unslash( $_POST['label'] ) ) : '';
+		$label  = isset( $_POST['label'] ) ? sanitize_text_field( wp_unslash( $_POST['label'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing
 		$job_id = substr( md5( uniqid( 'ssc_', true ) ), 0, 16 );
 
 		// Pre-asignar el lock anti-concurrencia ANTES de enviar la respuesta HTTP.
@@ -156,7 +156,7 @@ class SSC_Admin_Ajax {
 	 * @return void
 	 */
 	private function handle_get_backup_status(): void {
-		$job_id = isset( $_POST['job_id'] ) ? sanitize_key( $_POST['job_id'] ) : '';
+		$job_id = isset( $_POST['job_id'] ) ? sanitize_key( $_POST['job_id'] ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing
 		if ( ! $job_id ) {
 			wp_send_json_error( array( 'message' => __( 'job_id requerido.', 'super-sheep-copy' ) ), 400 );
 		}
@@ -175,7 +175,7 @@ class SSC_Admin_Ajax {
 	 * @return void
 	 */
 	private function handle_delete_backup(): void {
-		$filename = isset( $_POST['filename'] ) ? sanitize_file_name( wp_unslash( $_POST['filename'] ) ) : '';
+		$filename = isset( $_POST['filename'] ) ? sanitize_file_name( wp_unslash( $_POST['filename'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing
 		if ( ! $filename ) {
 			wp_send_json_error( array( 'message' => __( 'Nombre de archivo requerido.', 'super-sheep-copy' ) ), 400 );
 		}
@@ -200,7 +200,7 @@ class SSC_Admin_Ajax {
 	 * @return void
 	 */
 	private function handle_restore_backup(): void {
-		$filename = isset( $_POST['filename'] ) ? sanitize_file_name( wp_unslash( $_POST['filename'] ) ) : '';
+		$filename = isset( $_POST['filename'] ) ? sanitize_file_name( wp_unslash( $_POST['filename'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing
 		if ( ! $filename ) {
 			$this->send_json_clean( false, array( 'message' => __( 'Nombre de archivo requerido.', 'super-sheep-copy' ) ) );
 		}
@@ -259,7 +259,7 @@ class SSC_Admin_Ajax {
 	 * @return void
 	 */
 	private function handle_get_restore_status(): void {
-		$job_id = isset( $_POST['job_id'] ) ? sanitize_key( $_POST['job_id'] ) : '';
+		$job_id = isset( $_POST['job_id'] ) ? sanitize_key( $_POST['job_id'] ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing
 		if ( ! $job_id ) {
 			wp_send_json_error( array( 'message' => __( 'job_id requerido.', 'super-sheep-copy' ) ), 400 );
 		}
@@ -281,7 +281,7 @@ class SSC_Admin_Ajax {
 	 * @return void
 	 */
 	private function handle_get_manifest(): void {
-		$filename = isset( $_POST['filename'] ) ? sanitize_file_name( wp_unslash( $_POST['filename'] ) ) : '';
+		$filename = isset( $_POST['filename'] ) ? sanitize_file_name( wp_unslash( $_POST['filename'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing
 		if ( ! $filename ) {
 			wp_send_json_error( array( 'message' => __( 'Nombre de archivo requerido.', 'super-sheep-copy' ) ), 400 );
 		}
@@ -364,7 +364,7 @@ class SSC_Admin_Ajax {
 
 		// PHP continúa en segundo plano; no interrumpir si el cliente desconecta.
 		ignore_user_abort( true );
-		@set_time_limit( 0 ); // phpcs:ignore WordPress.PHP.NoSilencedErrors
+		@set_time_limit( 0 ); // phpcs:ignore WordPress.PHP.NoSilencedErrors, Squiz.PHP.DiscouragedFunctions.Discouraged
 	}
 
 	/**
@@ -427,7 +427,7 @@ class SSC_Admin_Ajax {
 			wp_die( esc_html__( 'No tienes permisos para descargar respaldos.', 'super-sheep-copy' ), 403 );
 		}
 
-		$filename = isset( $_GET['filename'] ) ? sanitize_file_name( rawurldecode( wp_unslash( $_GET['filename'] ) ) ) : '';
+		$filename = isset( $_GET['filename'] ) ? sanitize_file_name( rawurldecode( wp_unslash( $_GET['filename'] ) ) ) : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized
 		if ( ! $filename ) {
 			SSC_Logger::warn( 'download_backup', 'Intento de descarga sin nombre de archivo.' );
 			wp_die( esc_html__( 'Nombre de archivo no especificado.', 'super-sheep-copy' ), 400 );
@@ -460,7 +460,7 @@ class SSC_Admin_Ajax {
 			wp_die( esc_html__( 'No tienes permisos para restaurar.', 'super-sheep-copy' ), 403 );
 		}
 
-		if ( empty( $_FILES['ssc_zip_file'] ) || UPLOAD_ERR_OK !== $_FILES['ssc_zip_file']['error'] ) {
+		if ( empty( $_FILES['ssc_zip_file'] ) || UPLOAD_ERR_OK !== $_FILES['ssc_zip_file']['error'] ) { // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotValidated
 			SSC_Logger::warn( 'upload_restore', 'Error de subida de archivo.' );
 			wp_die( esc_html__( 'Error al subir el archivo. Inténtalo de nuevo.', 'super-sheep-copy' ), 400 );
 		}
@@ -481,7 +481,7 @@ class SSC_Admin_Ajax {
 		$stored_name  = 'uploaded-' . $timestamp . '-' . $hash . '.zip';
 		$stored_path  = SSC_BACKUPS_DIR . $stored_name;
 
-		if ( ! move_uploaded_file( $file['tmp_name'], $stored_path ) ) {
+		if ( ! move_uploaded_file( $file['tmp_name'], $stored_path ) ) { // phpcs:ignore Generic.PHP.ForbiddenFunctions.Found
 			SSC_Logger::error( 'upload_restore', 'No se pudo guardar el archivo subido en el directorio de respaldos.', $safe_name );
 			wp_die( esc_html__( 'No se pudo guardar el archivo subido.', 'super-sheep-copy' ), 500 );
 		}

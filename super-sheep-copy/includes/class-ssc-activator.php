@@ -91,7 +91,7 @@ class SSC_Activator {
 
 		// Asegurar permisos correctos.
 		if ( is_dir( $dir ) ) {
-			@chmod( $dir, 0755 ); // phpcs:ignore WordPress.PHP.NoSilencedErrors
+			@chmod( $dir, 0755 ); // phpcs:ignore WordPress.PHP.NoSilencedErrors, WordPress.WP.AlternativeFunctions.file_system_operations_chmod
 		}
 
 		self::write_htaccess( $dir );

@@ -85,7 +85,14 @@ class SSC_Files_Restore {
 
 		// Crear directorio temporal.
 		if ( ! wp_mkdir_p( $this->tmp_dir ) ) {
-			return new WP_Error( 'mkdir_failed', sprintf( __( 'No se pudo crear directorio temporal: %s', 'super-sheep-copy' ), $this->tmp_dir ) );
+			return new WP_Error(
+				'mkdir_failed',
+				sprintf(
+					/* translators: %s: directory path */
+					__( 'No se pudo crear directorio temporal: %s', 'super-sheep-copy' ),
+					$this->tmp_dir
+				)
+			);
 		}
 
 		$zip = new ZipArchive();
@@ -180,7 +187,14 @@ class SSC_Files_Restore {
 
 			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
 			if ( false === file_put_contents( $dest_path, $content ) ) {
-				return new WP_Error( 'extract_write_failed', sprintf( __( 'No se pudo escribir: %s', 'super-sheep-copy' ), $dest_path ) );
+				return new WP_Error(
+					'extract_write_failed',
+					sprintf(
+						/* translators: %s: destination file path */
+						__( 'No se pudo escribir: %s', 'super-sheep-copy' ),
+						$dest_path
+					)
+				);
 			}
 		}
 
@@ -244,10 +258,10 @@ class SSC_Files_Restore {
 			}
 
 			$src = $item->getPathname();
-			if ( ! @rename( $src, $target ) ) { // phpcs:ignore WordPress.PHP.NoSilencedErrors
+			if ( ! @rename( $src, $target ) ) { // phpcs:ignore WordPress.PHP.NoSilencedErrors, WordPress.WP.AlternativeFunctions.rename_rename
 				// rename() falla entre particiones distintas; usar copy+unlink.
 				if ( @copy( $src, $target ) ) { // phpcs:ignore WordPress.PHP.NoSilencedErrors
-					@unlink( $src ); // phpcs:ignore WordPress.PHP.NoSilencedErrors
+					@unlink( $src ); // phpcs:ignore WordPress.PHP.NoSilencedErrors, WordPress.WP.AlternativeFunctions.unlink_unlink
 				} else {
 					SSC_Logger::warn( 'files_restore', 'No se pudo copiar: ' . $relative );
 					$failures[] = $relative;

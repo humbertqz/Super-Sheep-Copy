@@ -119,7 +119,11 @@ class SSC_Zip_Writer {
 		if ( ! $added ) {
 			return new WP_Error(
 				'zip_add_failed',
-				sprintf( __( 'No se pudo añadir al ZIP: %s', 'super-sheep-copy' ), $real_path )
+				sprintf(
+					/* translators: %s: absolute file path */
+					__( 'No se pudo añadir al ZIP: %s', 'super-sheep-copy' ),
+					$real_path
+				)
 			);
 		}
 
@@ -143,7 +147,11 @@ class SSC_Zip_Writer {
 		if ( ! $added ) {
 			return new WP_Error(
 				'zip_add_string_failed',
-				sprintf( __( 'No se pudo añadir la cadena al ZIP como: %s', 'super-sheep-copy' ), $local_name )
+				sprintf(
+					/* translators: %s: entry name inside the ZIP */
+					__( 'No se pudo añadir la cadena al ZIP como: %s', 'super-sheep-copy' ),
+					$local_name
+				)
 			);
 		}
 

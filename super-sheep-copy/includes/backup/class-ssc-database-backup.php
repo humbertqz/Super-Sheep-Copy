@@ -136,7 +136,7 @@ class SSC_Database_Backup {
 		}
 
 		file_put_contents( $tmp_creds, $creds_content ); // phpcs:ignore WordPress.WP.AlternativeFunctions
-		chmod( $tmp_creds, 0600 );
+		chmod( $tmp_creds, 0600 ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_chmod
 
 		// Construir comando.
 		$output_escaped = escapeshellarg( $this->output_file );
@@ -154,7 +154,7 @@ class SSC_Database_Backup {
 		$exit_ok     = file_exists( $this->output_file ) && filesize( $this->output_file ) > 0;
 
 		// Eliminar el archivo de credenciales SIEMPRE, incluso si falla.
-		@unlink( $tmp_creds ); // phpcs:ignore WordPress.PHP.NoSilencedErrors
+		@unlink( $tmp_creds ); // phpcs:ignore WordPress.PHP.NoSilencedErrors, WordPress.WP.AlternativeFunctions.unlink_unlink
 
 		if ( ! $exit_ok ) {
 			$detail = $output ? substr( $output, 0, 500 ) : 'sin salida';
@@ -187,20 +187,20 @@ class SSC_Database_Backup {
 		// Obtener lista de tablas.
 		$tables = $wpdb->get_col( 'SHOW TABLES' ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
 		if ( empty( $tables ) ) {
-			fclose( $handle );
+			fclose( $handle ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose
 			return new WP_Error( 'no_tables', __( 'No se encontraron tablas en la base de datos.', 'super-sheep-copy' ) );
 		}
 
 		foreach ( $tables as $table ) {
 			$table_result = $this->dump_table( $handle, $table );
 			if ( is_wp_error( $table_result ) ) {
-				fclose( $handle );
+				fclose( $handle ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose
 				return $table_result;
 			}
 		}
 
 		$this->write( $handle, "\n-- Dump completado: " . gmdate( 'Y-m-d H:i:s' ) . " UTC\n" );
-		fclose( $handle );
+		fclose( $handle ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose
 
 		return true;
 	}
@@ -223,8 +223,8 @@ class SSC_Database_Backup {
 		$this->write( $handle, "-- --------------------------------------------------------\n\n" );
 		$this->write( $handle, "DROP TABLE IF EXISTS `{$table}`;\n" );
 
-		$create_row = $wpdb->get_row( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
-			$wpdb->prepare( 'SHOW CREATE TABLE `%1s`', $table ), // phpcs:ignore WordPress.DB.PreparedSQLPlaceholders
+		$create_row = $wpdb->get_row( // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.DirectDatabaseQuery.SchemaChange
+			$wpdb->prepare( 'SHOW CREATE TABLE `%1s`', $table ), // phpcs:ignore WordPress.DB.PreparedSQLPlaceholders, WordPress.DB.DirectDatabaseQuery.SchemaChange
 			ARRAY_N
 		);
 

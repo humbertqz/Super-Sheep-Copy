@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Super Sheep Copy
  * Description: Respaldos completos (archivos + DB) con restauración y reescritura de URLs.
- * Version:     0.0.1
+ * Version:     0.0.2
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * Author: Humberto Quezada
@@ -56,7 +56,7 @@ if ( version_compare( PHP_VERSION, SSC_MIN_PHP, '<' ) ) {
 }
 
 // ── Constantes globales ───────────────────────────────────────────────────────
-define( 'SSC_VERSION',     '0.0.1' );
+define( 'SSC_VERSION',     '0.0.2' );
 define( 'SSC_PLUGIN_FILE', __FILE__ );
 define( 'SSC_PLUGIN_DIR',  plugin_dir_path( __FILE__ ) );
 define( 'SSC_PLUGIN_URL',  plugin_dir_url( __FILE__ ) );
@@ -121,6 +121,5 @@ register_deactivation_hook( SSC_PLUGIN_FILE, array( 'SSC_Deactivator', 'deactiva
 
 // ── Arranque del plugin ───────────────────────────────────────────────────────
 add_action( 'plugins_loaded', function () {
-	load_plugin_textdomain( 'super-sheep-copy', false, dirname( plugin_basename( SSC_PLUGIN_FILE ) ) . '/languages' );
 	SSC_Plugin::get_instance();
 } );

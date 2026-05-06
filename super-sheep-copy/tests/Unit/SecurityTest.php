@@ -1,4 +1,5 @@
 <?php
+
 /**
  * Tests para SSC_Security — path traversal y Zip Slip.
  *
@@ -7,7 +8,12 @@
 
 declare( strict_types=1 );
 
+
 namespace SSC\Tests\Unit;
+
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
 
 /**
  * @covers \SSC_Security
@@ -19,7 +25,7 @@ class SecurityTest extends TestCase {
     protected function setUp(): void {
         parent::setUp();
         $this->backups_dir = SSC_BACKUPS_DIR;
-        @mkdir( $this->backups_dir, 0755, true );
+        @mkdir( $this->backups_dir, 0755, true ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_mkdir
     }
 
     // ── resolve_backup_path ───────────────────────────────────────────────────
@@ -35,7 +41,7 @@ class SecurityTest extends TestCase {
         $this->assertIsString( $result );
         $this->assertStringEndsWith( $filename, $result );
 
-        unlink( $full );
+        unlink( $full ); // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
     }
 
     /** @test */

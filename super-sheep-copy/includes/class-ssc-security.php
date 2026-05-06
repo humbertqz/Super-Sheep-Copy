@@ -107,20 +107,20 @@ class SSC_Security {
 		}
 
 		// Eliminar el ZIP.
-		if ( ! @unlink( $path ) ) { // phpcs:ignore WordPress.PHP.NoSilencedErrors
+		if ( ! @unlink( $path ) ) { // phpcs:ignore WordPress.PHP.NoSilencedErrors, WordPress.WP.AlternativeFunctions.unlink_unlink
 			return new WP_Error( 'delete_failed', __( 'No se pudo eliminar el archivo.', 'super-sheep-copy' ) );
 		}
 
 		// Eliminar el .sha256 si existe (no es crítico).
 		$sha_path = $path . '.sha256';
 		if ( file_exists( $sha_path ) ) {
-			@unlink( $sha_path ); // phpcs:ignore WordPress.PHP.NoSilencedErrors
+			@unlink( $sha_path ); // phpcs:ignore WordPress.PHP.NoSilencedErrors, WordPress.WP.AlternativeFunctions.unlink_unlink
 		}
 
 		// Eliminar el .meta si existe.
 		$meta_path = $path . '.meta';
 		if ( file_exists( $meta_path ) ) {
-			@unlink( $meta_path ); // phpcs:ignore WordPress.PHP.NoSilencedErrors
+			@unlink( $meta_path ); // phpcs:ignore WordPress.PHP.NoSilencedErrors, WordPress.WP.AlternativeFunctions.unlink_unlink
 		}
 
 		return true;
@@ -155,8 +155,8 @@ class SSC_Security {
 		if ( ! $handle ) {
 			return new WP_Error( 'cannot_read', __( 'No se pudo leer el archivo subido.', 'super-sheep-copy' ) );
 		}
-		$magic = fread( $handle, 4 );
-		fclose( $handle );
+		$magic = fread( $handle, 4 ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fread
+		fclose( $handle ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose
 
 		if ( "\x50\x4B\x03\x04" !== $magic ) {
 			return new WP_Error( 'invalid_magic', __( 'El archivo no es un ZIP válido.', 'super-sheep-copy' ) );

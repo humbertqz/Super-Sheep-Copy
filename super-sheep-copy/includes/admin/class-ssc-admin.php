@@ -266,7 +266,7 @@ class SSC_Admin {
 
 		check_admin_referer( 'bulk-respaldos' );
 
-		$filenames = isset( $_POST['backup'] ) ? (array) $_POST['backup'] : array(); // phpcs:ignore WordPress.Security.NonceVerification
+		$filenames = isset( $_POST['backup'] ) ? (array) wp_unslash( $_POST['backup'] ) : array(); // phpcs:ignore WordPress.Security.NonceVerification, WordPress.Security.ValidatedSanitizedInput
 		$deleted   = 0;
 		$errors    = 0;
 
@@ -350,7 +350,7 @@ class SSC_Admin {
 
 		global $wpdb;
 		$table      = $wpdb->prefix . 'ssc_audit_log';
-		$raw        = $wpdb->get_results( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+		$raw        = $wpdb->get_results( // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.NoCaching, PluginCheck.Security.DirectDB.UnescapedDBParameter
 			$wpdb->prepare( "SELECT * FROM {$table} ORDER BY created_at DESC LIMIT %d", 500 ), // phpcs:ignore WordPress.DB.PreparedSQL
 			ARRAY_A
 		);

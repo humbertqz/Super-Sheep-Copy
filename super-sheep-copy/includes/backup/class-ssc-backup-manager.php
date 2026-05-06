@@ -73,7 +73,7 @@ class SSC_Backup_Manager {
 
 		// Elevar límites si el servidor lo permite.
 		wp_raise_memory_limit( 'admin' );
-		@set_time_limit( 0 ); // phpcs:ignore WordPress.PHP.NoSilencedErrors
+		@set_time_limit( 0 ); // phpcs:ignore WordPress.PHP.NoSilencedErrors, Squiz.PHP.DiscouragedFunctions.Discouraged
 
 		do_action( 'ssc_backup_started', $this->job_id );
 
@@ -169,7 +169,7 @@ class SSC_Backup_Manager {
 
 		} finally {
 			if ( file_exists( $sql_path ) ) {
-				@unlink( $sql_path ); // phpcs:ignore WordPress.PHP.NoSilencedErrors
+				@unlink( $sql_path ); // phpcs:ignore WordPress.PHP.NoSilencedErrors, WordPress.WP.AlternativeFunctions.unlink_unlink
 			}
 		}
 
@@ -421,14 +421,14 @@ class SSC_Backup_Manager {
 	 */
 	private function cleanup_temp_files( string $sql_path, string $zip_path ): void {
 		if ( file_exists( $sql_path ) ) {
-			@unlink( $sql_path ); // phpcs:ignore WordPress.PHP.NoSilencedErrors
+			@unlink( $sql_path ); // phpcs:ignore WordPress.PHP.NoSilencedErrors, WordPress.WP.AlternativeFunctions.unlink_unlink
 		}
 		if ( file_exists( $zip_path ) ) {
-			@unlink( $zip_path ); // phpcs:ignore WordPress.PHP.NoSilencedErrors
+			@unlink( $zip_path ); // phpcs:ignore WordPress.PHP.NoSilencedErrors, WordPress.WP.AlternativeFunctions.unlink_unlink
 		}
 		$meta_path = $zip_path . '.meta';
 		if ( file_exists( $meta_path ) ) {
-			@unlink( $meta_path ); // phpcs:ignore WordPress.PHP.NoSilencedErrors
+			@unlink( $meta_path ); // phpcs:ignore WordPress.PHP.NoSilencedErrors, WordPress.WP.AlternativeFunctions.unlink_unlink
 		}
 	}
 }
