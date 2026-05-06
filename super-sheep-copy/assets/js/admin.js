@@ -126,29 +126,17 @@
           // Ambiguous response: fastcgi_finish_request() may have closed the
           // connection before the full JSON reached jQuery, causing a parse
           // error or empty body. The backup IS likely running in background.
-          // Reload so the page detects runningBackupJobId and resumes polling.
-          stopSimulation();
-          hideProgress("#ssc-progress-wrap");
-          showWarning(
-            sscData.strings.errorPollTimeout || sscData.strings.error,
-          );
-          setTimeout(function () {
-            window.location.reload();
-          }, 4000);
+          // Try to discover the running job before showing any warning.
+          recoverRunningBackup();
         }
       })
       .fail(function () {
         // ANY network/HTTP failure on the create-backup initiation is treated as
         // ambiguous: fastcgi_finish_request() closes the socket early, which can
         // cause the Apache proxy to return 500/502/504/0/408 even when the backup
-        // PHP process is running fine in background. Always reload so the page can
-        // pick up runningBackupJobId and resume polling.
-        stopSimulation();
-        hideProgress("#ssc-progress-wrap");
-        showWarning(sscData.strings.errorPollTimeout || sscData.strings.error);
-        setTimeout(function () {
-          window.location.reload();
-        }, 4000);
+        // PHP process is running fine in background. Try to discover the running
+        // job silently before falling back to the warning + reload.
+        recoverRunningBackup();
       });
   });
 
@@ -825,6 +813,96 @@
     $("#ssc-progress-label, #ssc-restore-progress-label").removeClass(
       "is-done",
     );
+  }
+
+  /**
+   * Intenta recuperarse cuando la respuesta de ssc_create_backup no llegó al
+   * navegador (p. ej. por buffering de proxy inverso o cierre prematuro del
+   * socket por fastcgi_finish_request). Consulta ssc_get_running_jobs para
+   * detectar si el respaldo se inició en background y, si es así, reanuda el
+   * polling sin mostrar ninguna advertencia. Solo como último recurso (si no
+   * encuentra ningún job en varios intentos) muestra la advertencia y recarga.
+   */
+  function recoverRunningBackup() {
+    var attempts = 0;
+    var MAX_ATTEMPTS = 5;
+
+    function check() {
+      $.post(sscData.ajaxUrl, {
+        action: "ssc_get_running_jobs",
+        nonce: sscData.nonce,
+      })
+        .done(function (response) {
+          if (
+            response &&
+            response.success &&
+            response.data &&
+            response.data.backup_job_id
+          ) {
+            // Job encontrado — reanudar polling sin mostrar advertencia.
+            $("#ssc-progress-label").text(
+              sscData.strings.backupInProgress || "Respaldo en curso…",
+            );
+            startPolling(
+              response.data.backup_job_id,
+              "ssc_get_backup_status",
+              function () {
+                finishProgress(
+                  "#ssc-progress-bar",
+                  "#ssc-progress-label",
+                  sscData.strings.done || "Respaldo completado.",
+                );
+                setTimeout(function () {
+                  hideProgress("#ssc-progress-wrap");
+                  window.location.reload();
+                }, 1200);
+              },
+              function (msg, lostContact) {
+                stopSimulation();
+                hideProgress("#ssc-progress-wrap");
+                if (lostContact) {
+                  showWarning(msg);
+                } else {
+                  showError(msg);
+                  $("#ssc-create-backup").prop("disabled", false);
+                }
+              },
+            );
+          } else if (attempts < MAX_ATTEMPTS) {
+            attempts++;
+            setTimeout(check, 2000);
+          } else {
+            // Ningún job activo tras varios intentos — mostrar advertencia.
+            stopSimulation();
+            hideProgress("#ssc-progress-wrap");
+            showWarning(
+              sscData.strings.errorPollTimeout || sscData.strings.error,
+            );
+            setTimeout(function () {
+              window.location.reload();
+            }, 4000);
+          }
+        })
+        .fail(function () {
+          if (attempts < MAX_ATTEMPTS) {
+            attempts++;
+            setTimeout(check, 2000);
+          } else {
+            stopSimulation();
+            hideProgress("#ssc-progress-wrap");
+            showWarning(
+              sscData.strings.errorPollTimeout || sscData.strings.error,
+            );
+            setTimeout(function () {
+              window.location.reload();
+            }, 4000);
+          }
+        });
+    }
+
+    // Esperar 1.5 s antes de la primera consulta para dar tiempo al servidor
+    // a escribir el transient antes de intentar leerlo.
+    setTimeout(check, 1500);
   }
 
   function showError(message) {

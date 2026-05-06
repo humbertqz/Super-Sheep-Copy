@@ -34,6 +34,7 @@ class SSC_Admin_Ajax {
 			'ssc_restore_backup',
 			'ssc_get_restore_status',
 			'ssc_get_manifest',
+			'ssc_get_running_jobs',
 		);
 		foreach ( $ajax_actions as $action ) {
 			add_action( 'wp_ajax_' . $action, array( $this, 'dispatch_ajax' ) );
@@ -83,6 +84,9 @@ class SSC_Admin_Ajax {
 				break;
 			case 'ssc_get_manifest':
 				$this->handle_get_manifest();
+				break;
+			case 'ssc_get_running_jobs':
+				$this->handle_get_running_jobs();
 				break;
 			default:
 				wp_send_json_error( array( 'message' => __( 'Acción desconocida.', 'super-sheep-copy' ) ), 400 );
@@ -276,6 +280,24 @@ class SSC_Admin_Ajax {
 	}
 
 	/**
+	 * Devuelve los job IDs de operaciones actualmente en curso (backup o restauración).
+	 *
+	 * Usado por el cliente JS para recuperarse cuando la respuesta inicial de
+	 * ssc_create_backup / ssc_restore_backup no llegó al navegador (p. ej. por
+	 * buffering de proxy inverso), pero el proceso PHP sí se inició en background.
+	 *
+	 * @return void
+	 */
+	private function handle_get_running_jobs(): void {
+		$backup_job  = get_transient( 'ssc_backup_running' );
+		$restore_job = get_transient( 'ssc_restore_running' );
+		wp_send_json_success( array(
+			'backup_job_id'  => $backup_job  ? (string) $backup_job  : '',
+			'restore_job_id' => $restore_job ? (string) $restore_job : '',
+		) );
+	}
+
+	/**
 	 * Devuelve el manifest.json de un respaldo.
 	 *
 	 * @return void
@@ -342,6 +364,14 @@ class SSC_Admin_Ajax {
 		);
 
 		$json = wp_json_encode( $envelope );
+
+		// Prevent server-level gzip (mod_deflate / zlib) from compressing the body,
+		// which would invalidate the Content-Length we are about to set and cause
+		// browsers / proxies to receive a truncated or unparseable response.
+		if ( function_exists( 'apache_setenv' ) ) {
+			@apache_setenv( 'no-gzip', '1' ); // phpcs:ignore WordPress.PHP.NoSilencedErrors
+		}
+		@ini_set( 'zlib.output_compression', '0' ); // phpcs:ignore WordPress.PHP.NoSilencedErrors
 
 		header( 'Content-Encoding: identity' );
 		header( 'Content-Type: application/json; charset=UTF-8' );
