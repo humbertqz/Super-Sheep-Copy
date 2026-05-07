@@ -352,4 +352,76 @@ class DatabaseBackupTest extends TestCase {
         $this->assertStringContainsString( "'row-1'", $sql,   'First row (page 1) should be in the dump.' );
         $this->assertStringContainsString( "'row-520'", $sql, 'Last row (page 2) should be in the dump.' );
     }
+
+    // ── looks_like_sql() ──────────────────────────────────────────────────────
+
+    private function invoke_looks_like_sql( string $content ): bool {
+        $file = tempnam( sys_get_temp_dir(), 'ssc_sql_check_' );
+        file_put_contents( $file, $content );
+        $method = new \ReflectionMethod( \SSC_Database_Backup::class, 'looks_like_sql' );
+        $result = $method->invoke( new \SSC_Database_Backup( '/dev/null' ), $file );
+        @unlink( $file ); // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
+        return $result;
+    }
+
+    /** @test */
+    public function looks_like_sql_accepts_set_statement(): void {
+        $this->assertTrue( $this->invoke_looks_like_sql( "SET NAMES utf8mb4;\n" ) );
+    }
+
+    /** @test */
+    public function looks_like_sql_accepts_sql_comment(): void {
+        $this->assertTrue( $this->invoke_looks_like_sql( "-- MySQL dump\nSET NAMES utf8mb4;\n" ) );
+    }
+
+    /** @test */
+    public function looks_like_sql_accepts_create_statement(): void {
+        $this->assertTrue( $this->invoke_looks_like_sql( "CREATE TABLE `wp_options` (...);\n" ) );
+    }
+
+    /** @test */
+    public function looks_like_sql_rejects_command_not_found_error(): void {
+        // Regression: shell writes "sh: mysqldump: command not found" when the
+        // binary is missing. This must NOT be treated as a valid SQL dump.
+        $this->assertFalse( $this->invoke_looks_like_sql( "sh: mysqldump: command not found\n" ) );
+    }
+
+    /** @test */
+    public function looks_like_sql_rejects_bash_command_not_found_error(): void {
+        $this->assertFalse( $this->invoke_looks_like_sql( "bash: mysqldump: command not found\n" ) );
+    }
+
+    /** @test */
+    public function looks_like_sql_rejects_empty_file(): void {
+        $this->assertFalse( $this->invoke_looks_like_sql( '' ) );
+    }
+
+    // ── is_mysqldump_available() ──────────────────────────────────────────────
+
+    /** @test */
+    public function is_mysqldump_available_returns_false_for_command_not_found_output(): void {
+        // The old check used strpos($output, 'mysqldump') which incorrectly
+        // returned true for "sh: mysqldump: command not found".
+        $backup = new class( '/dev/null' ) extends \SSC_Database_Backup {
+            protected function is_mysqldump_available(): bool {
+                // Simulate what the fixed method does: require 'Ver ' in output.
+                $output = 'sh: mysqldump: command not found';
+                return ! empty( $output ) && strpos( $output, 'Ver ' ) !== false;
+            }
+        };
+        $method = new \ReflectionMethod( $backup, 'is_mysqldump_available' );
+        $this->assertFalse( $method->invoke( $backup ) );
+    }
+
+    /** @test */
+    public function is_mysqldump_available_returns_true_for_real_version_output(): void {
+        $backup = new class( '/dev/null' ) extends \SSC_Database_Backup {
+            protected function is_mysqldump_available(): bool {
+                $output = 'mysqldump  Ver 8.0.32 Distrib 8.0.32, for macos13.0 (arm64)';
+                return ! empty( $output ) && strpos( $output, 'Ver ' ) !== false;
+            }
+        };
+        $method = new \ReflectionMethod( $backup, 'is_mysqldump_available' );
+        $this->assertTrue( $method->invoke( $backup ) );
+    }
 }

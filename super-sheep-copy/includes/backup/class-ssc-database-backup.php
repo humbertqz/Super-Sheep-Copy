@@ -92,7 +92,9 @@ class SSC_Database_Backup {
 		}
 
 		$output = @shell_exec( 'mysqldump --version 2>&1' ); // phpcs:ignore WordPress.PHP.NoSilencedErrors
-		return ! empty( $output ) && strpos( $output, 'mysqldump' ) !== false;
+		// A valid version string always contains 'Ver ' (e.g. "mysqldump  Ver 8.0.32 Distrib ...").
+		// "command not found" messages also contain 'mysqldump' but never 'Ver '.
+		return ! empty( $output ) && strpos( $output, 'Ver ' ) !== false;
 	}
 
 	/**
@@ -150,14 +152,18 @@ class SSC_Database_Backup {
 			$output_escaped
 		);
 
-		$output      = @shell_exec( $cmd ); // phpcs:ignore WordPress.PHP.NoSilencedErrors
-		$exit_ok     = file_exists( $this->output_file ) && filesize( $this->output_file ) > 0;
+		@shell_exec( $cmd ); // phpcs:ignore WordPress.PHP.NoSilencedErrors
+		$file_size   = file_exists( $this->output_file ) ? filesize( $this->output_file ) : 0;
+		$exit_ok     = $file_size > 0 && $this->looks_like_sql( $this->output_file );
 
 		// Eliminar el archivo de credenciales SIEMPRE, incluso si falla.
 		@unlink( $tmp_creds ); // phpcs:ignore WordPress.PHP.NoSilencedErrors, WordPress.WP.AlternativeFunctions.unlink_unlink
 
 		if ( ! $exit_ok ) {
-			$detail = $output ? substr( $output, 0, 500 ) : 'sin salida';
+			$detail = ( $file_size > 0 )
+				// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+				? substr( (string) file_get_contents( $this->output_file, false, null, 0, 500 ), 0, 500 )
+				: 'sin salida';
 			SSC_Logger::warn( 'db_backup', 'mysqldump retornó error: ' . $detail );
 			return new WP_Error( 'mysqldump_failed', $detail );
 		}
@@ -309,6 +315,31 @@ class SSC_Database_Backup {
 	}
 
 	// ── Helpers ───────────────────────────────────────────────────────────────
+
+	/**
+	 * Comprueba si un archivo parece un dump SQL válido leyendo su inicio.
+	 *
+	 * Detecta falsos positivos como "sh: mysqldump: command not found" que
+	 * el shell escribe en el archivo cuando la redirección 2>&1 está activa.
+	 *
+	 * @param string $file Ruta al archivo a inspeccionar.
+	 * @return bool
+	 */
+	private function looks_like_sql( string $file ): bool {
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+		$head = (string) file_get_contents( $file, false, null, 0, 256 );
+		if ( '' === $head ) {
+			return false;
+		}
+		// Un dump SQL empieza con un comentario '--', 'SET', 'CREATE' o 'DROP'.
+		$first = strtoupper( ltrim( $head ) );
+		return (
+			strpos( $first, '--' ) === 0 ||
+			strpos( $first, 'SET ' ) === 0 ||
+			strpos( $first, 'CREATE ' ) === 0 ||
+			strpos( $first, 'DROP ' ) === 0
+		);
+	}
 
 	/**
 	 * Construye la cabecera del archivo SQL.
