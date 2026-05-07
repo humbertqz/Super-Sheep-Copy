@@ -177,4 +177,53 @@ class ZipWriterTest extends TestCase {
         $this->assertSame( 3, $count );
         $this->assertSame( 3, $writer->get_file_count() );
     }
+
+    // ── reopen() ─────────────────────────────────────────────────────────────
+
+    /** @test */
+    public function reopen_preserves_existing_entries(): void {
+        $zip_path = $this->work_dir . '/reopen_test.zip';
+        $writer   = new \SSC_Zip_Writer( $zip_path );
+
+        $writer->open();
+        $writer->add_from_string( 'first.txt', 'first-content' );
+        $writer->close();
+
+        $result = $writer->reopen();
+        $this->assertTrue( $result, 'reopen() should return true on a valid existing ZIP.' );
+        $writer->add_from_string( 'second.txt', 'second-content' );
+        $writer->close();
+
+        $zip = new \ZipArchive();
+        $zip->open( $zip_path, \ZipArchive::RDONLY );
+        $this->assertSame( 'first-content',  $zip->getFromName( 'first.txt' ) );
+        $this->assertSame( 'second-content', $zip->getFromName( 'second.txt' ) );
+        $this->assertSame( 2, $zip->count() );
+        $zip->close();
+    }
+
+    /** @test */
+    public function reopen_does_not_reset_file_count(): void {
+        $zip_path = $this->work_dir . '/count_reopen.zip';
+        $writer   = new \SSC_Zip_Writer( $zip_path );
+
+        $writer->open();
+        $writer->add_from_string( 'a.txt', 'a' );
+        $writer->add_from_string( 'b.txt', 'b' );
+        $writer->close();
+
+        $writer->reopen();
+        $writer->add_from_string( 'c.txt', 'c' );
+        $writer->close();
+
+        $this->assertSame( 3, $writer->get_file_count(), 'file_count must be cumulative across open/reopen cycles.' );
+    }
+
+    /** @test */
+    public function reopen_returns_error_for_nonexistent_zip(): void {
+        $writer = new \SSC_Zip_Writer( $this->work_dir . '/does_not_exist.zip' );
+        $result = $writer->reopen();
+        $this->assertInstanceOf( \WP_Error::class, $result );
+        $this->assertSame( 'zip_reopen_not_found', $result->get_error_code() );
+    }
 }

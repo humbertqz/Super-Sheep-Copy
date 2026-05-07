@@ -69,7 +69,10 @@ class SSC_Backup_Manager {
 	 */
 	public function start( string $label = '', string $type = 'manual', string $job_id = '' ) {
 		$this->job_id   = $job_id ?: $this->generate_job_id();
-		$this->settings = (array) get_option( 'ssc_settings', array() );
+		$this->settings = wp_parse_args(
+			(array) get_option( 'ssc_settings', array() ),
+			array( 'chunk_size' => SSC_Files_Backup::FILES_PER_CHUNK )
+		);
 
 		// Elevar límites si el servidor lo permite.
 		wp_raise_memory_limit( 'admin' );

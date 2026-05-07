@@ -18,6 +18,12 @@ if ( ! defined( 'ABSPATH' ) ) {
 class SSC_Files_Backup {
 
 	/**
+	 * Número de archivos a procesar antes de flushear el ZIP al disco.
+	 * Configurable vía ssc_settings['chunk_size'].
+	 */
+	const FILES_PER_CHUNK = 100;
+
+	/**
 	 * Instancia del writer ZIP.
 	 *
 	 * @var SSC_Zip_Writer
@@ -58,6 +64,7 @@ class SSC_Files_Backup {
 			array(
 				'include_core' => 1,
 				'exclude_logs' => 1,
+				'chunk_size'   => self::FILES_PER_CHUNK,
 			)
 		);
 		$this->build_excluded_paths();
@@ -73,7 +80,9 @@ class SSC_Files_Backup {
 	public function run() {
 		SSC_Logger::info( 'files_backup', 'Iniciando empaquetado de archivos.' );
 
-		$abspath = rtrim( ABSPATH, '/\\' );
+		$abspath     = rtrim( ABSPATH, '/\\' );
+		$chunk_size  = max( 1, (int) $this->settings['chunk_size'] );
+		$chunk_count = 0;
 
 		try {
 			$dir_iterator = new RecursiveDirectoryIterator(
@@ -116,10 +125,50 @@ class SSC_Files_Backup {
 			}
 
 			++$this->file_count;
+			++$chunk_count;
+
+			if ( $chunk_count >= $chunk_size ) {
+				$flush = $this->flush_chunk();
+				if ( is_wp_error( $flush ) ) {
+					return $flush;
+				}
+				$chunk_count = 0;
+			}
 		}
 
-		SSC_Logger::info( 'files_backup', sprintf( 'Empaquetado completado. Archivos añadidos: %d', $this->file_count ) );
+		SSC_Logger::info(
+			'files_backup',
+			sprintf( 'Empaquetado completado. Archivos añadidos: %d', $this->file_count )
+		);
 		return true;
+	}
+
+	/**
+	 * Flushea el chunk actual al disco: cierra el ZIP, libera memoria y lo reabre.
+	 * El ZIP queda abierto al retornar para que el caller pueda continuar añadiendo archivos.
+	 *
+	 * @return true|WP_Error
+	 */
+	private function flush_chunk() {
+		$close = $this->zip->close();
+		if ( is_wp_error( $close ) ) {
+			return $close;
+		}
+
+		gc_collect_cycles();
+		@set_time_limit( 30 ); // phpcs:ignore WordPress.PHP.NoSilencedErrors, Squiz.PHP.DiscouragedFunctions.Discouraged
+
+		$mem_limit    = wp_convert_hr_to_bytes( ini_get( 'memory_limit' ) );
+		$mem_used_pct = $mem_limit > 0
+			? round( ( memory_get_usage( true ) / $mem_limit ) * 100, 1 )
+			: 0;
+
+		SSC_Logger::info(
+			'files_backup',
+			sprintf( 'Chunk flushed (%d archivos). Memoria: %s%%', $this->file_count, $mem_used_pct )
+		);
+
+		return $this->zip->reopen();
 	}
 
 	/**

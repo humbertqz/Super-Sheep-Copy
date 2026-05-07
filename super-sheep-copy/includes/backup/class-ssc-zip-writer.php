@@ -98,6 +98,45 @@ class SSC_Zip_Writer {
 	}
 
 	/**
+	 * Reabre un ZIP existente en modo append (sin OVERWRITE).
+	 *
+	 * Debe llamarse después de close(). No resetea $file_count para
+	 * que el total acumulado sobreviva entre chunks.
+	 *
+	 * @return true|WP_Error
+	 */
+	public function reopen() {
+		if ( ! file_exists( $this->zip_path ) ) {
+			return new WP_Error(
+				'zip_reopen_not_found',
+				sprintf(
+					/* translators: %s: ZIP file path */
+					__( 'No se puede reabrir el ZIP porque no existe: %s', 'super-sheep-copy' ),
+					$this->zip_path
+				)
+			);
+		}
+
+		$result = $this->zip->open( $this->zip_path, ZipArchive::CREATE );
+
+		if ( true !== $result ) {
+			return new WP_Error(
+				'zip_reopen_failed',
+				sprintf(
+					/* translators: 1: path, 2: error code */
+					__( 'No se pudo reabrir el archivo ZIP en %1$s (código: %2$d).', 'super-sheep-copy' ),
+					$this->zip_path,
+					$result
+				)
+			);
+		}
+
+		$this->is_open = true;
+		// No resetear $file_count — acumulativo entre chunks.
+		return true;
+	}
+
+	/**
 	 * Añade un archivo del sistema de archivos al ZIP.
 	 *
 	 * @param string $real_path   Ruta absoluta del archivo a añadir.

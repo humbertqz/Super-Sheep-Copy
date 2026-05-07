@@ -114,6 +114,21 @@ if ( ! class_exists( 'SSC_Self_Updater' ) ) {
     }
 }
 
+if ( ! function_exists( 'wp_convert_hr_to_bytes' ) ) {
+    function wp_convert_hr_to_bytes( string $value ): int {
+        $value = strtolower( trim( $value ) );
+        $bytes = (int) $value;
+        if ( str_ends_with( $value, 'g' ) ) {
+            $bytes *= 1024 * 1024 * 1024;
+        } elseif ( str_ends_with( $value, 'm' ) ) {
+            $bytes *= 1024 * 1024;
+        } elseif ( str_ends_with( $value, 'k' ) ) {
+            $bytes *= 1024;
+        }
+        return $bytes;
+    }
+}
+
 if ( ! function_exists( 'is_serialized' ) ) {
     /**
      * Verifica si un valor es una cadena serializada de PHP.

@@ -360,4 +360,80 @@ class FilesBackupTest extends TestCase {
 		$backup_subpath = rtrim( $excluded_paths[0], '/\\' ) . '/backup-20260101-abcd1234.zip';
 		$this->assertTrue( $is_excluded->invoke( $backup, $backup_subpath ) );
 	}
+
+	// ── run() — procesamiento en chunks ──────────────────────────────────────
+
+	/** @test */
+	public function test_chunked_run_produces_same_result_as_single_run(): void {
+		$uid   = uniqid( 'chunk_' );
+		$files = array();
+		for ( $i = 1; $i <= 5; $i++ ) {
+			$path           = ABSPATH . $uid . "_file{$i}.txt";
+			$files[ $path ] = "content-{$i}";
+			file_put_contents( $path, "content-{$i}" );
+		}
+
+		[ $writer, $zip_path ] = $this->make_open_writer();
+		// chunk_size=1 forces a flush after every single file.
+		$backup = new \SSC_Files_Backup( $writer, array( 'chunk_size' => 1 ) );
+		$result = $backup->run();
+		$writer->close();
+
+		foreach ( $files as $path => $_ ) {
+			@unlink( $path ); // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
+		}
+
+		$this->assertTrue( $result, 'run() should return true.' );
+
+		$zip = new \ZipArchive();
+		$zip->open( $zip_path, \ZipArchive::RDONLY );
+		for ( $i = 1; $i <= 5; $i++ ) {
+			$found = false;
+			for ( $j = 0; $j < $zip->count(); $j++ ) {
+				if ( basename( $zip->getNameIndex( $j ) ) === $uid . "_file{$i}.txt" ) {
+					$this->assertSame( "content-{$i}", $zip->getFromIndex( $j ) );
+					$found = true;
+					break;
+				}
+			}
+			$this->assertTrue( $found, "File {$i} missing from chunked ZIP." );
+		}
+		$zip->close();
+	}
+
+	/** @test */
+	public function test_zip_remains_open_after_run(): void {
+		[ $writer, $zip_path ] = $this->make_open_writer();
+		$backup = new \SSC_Files_Backup( $writer, array( 'chunk_size' => 2 ) );
+		$backup->run();
+
+		// ZIP must still be open so BackupManager can add manifest.json without reopening.
+		$add_result = $writer->add_from_string( 'manifest.json', '{"status":"ok"}' );
+		$writer->close();
+
+		$this->assertTrue( $add_result, 'ZIP should still be open after run() returns.' );
+
+		$zip      = new \ZipArchive();
+		$zip->open( $zip_path, \ZipArchive::RDONLY );
+		$manifest = $zip->getFromName( 'manifest.json' );
+		$zip->close();
+
+		$this->assertSame( '{"status":"ok"}', $manifest );
+	}
+
+	/** @test */
+	public function test_chunk_size_default_equals_class_constant(): void {
+		[ $writer ] = $this->make_open_writer();
+		$writer->close();
+
+		$backup        = new \SSC_Files_Backup( $writer );
+		$settings_prop = new \ReflectionProperty( \SSC_Files_Backup::class, 'settings' );
+		$settings      = $settings_prop->getValue( $backup );
+
+		$this->assertSame( \SSC_Files_Backup::FILES_PER_CHUNK, $settings['chunk_size'] );
+
+		$backup_custom   = new \SSC_Files_Backup( $writer, array( 'chunk_size' => 50 ) );
+		$settings_custom = $settings_prop->getValue( $backup_custom );
+		$this->assertSame( 50, $settings_custom['chunk_size'] );
+	}
 }
