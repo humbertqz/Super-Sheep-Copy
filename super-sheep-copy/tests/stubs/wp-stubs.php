@@ -8,6 +8,11 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
+// Constantes de formato de resultado de $wpdb (WordPress las define globalmente).
+if ( ! defined( 'ARRAY_A' ) ) { define( 'ARRAY_A', 'ARRAY_A' ); }
+if ( ! defined( 'ARRAY_N' ) ) { define( 'ARRAY_N', 'ARRAY_N' ); }
+if ( ! defined( 'OBJECT'   ) ) { define( 'OBJECT',   'OBJECT'   ); }
+
 /**
  * Stub de $wpdb para evitar "Call to a member function on null" en SSC_Logger.
  * Se asigna al global antes de cargar las clases del plugin.

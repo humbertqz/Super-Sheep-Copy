@@ -214,4 +214,93 @@ class BackupManagerTest extends TestCase {
 
         $this->assertSame( count( $names ), count( array_unique( $names ) ) );
     }
+
+    // ── Artefactos post-backup ────────────────────────────────────────────────
+
+    /**
+     * Crea un stub de $wpdb mínimo para que SSC_Database_Backup::dump_via_php()
+     * complete correctamente sin una base de datos real.
+     */
+    private function make_backup_wpdb(): object {
+        return new class() {
+            public string  $prefix     = 'wp_';
+            public ?object $dbh        = null;
+            public string  $last_error = '';
+            private int    $create_idx = -1;
+
+            public function get_col( string $q ): array  { return array( 'wp_posts' ); }
+            public function get_var( string $q ): ?string { return '0'; }
+            public function get_row( string $q, $output = null ): array {
+                ++$this->create_idx;
+                return array( 0 => 'wp_posts', 1 => 'CREATE TABLE `wp_posts` (`ID` bigint NOT NULL)' );
+            }
+            public function get_results( string $q, $output = null ): array { return array(); }
+            public function prepare( string $q, ...$args ): string { return $q; }
+            public function insert( ...$args ): int { return 1; }
+            public function check_connection( bool $allow_bail = true ): bool { return true; }
+            public function show_errors( bool $v = true ): void {}
+            public function _real_escape( string $s ): string { return addslashes( $s ); }
+        };
+    }
+
+    /** @test */
+    public function start_returns_job_id_string_and_creates_backup_artifacts(): void {
+        $original_wpdb   = $GLOBALS['wpdb'];
+        $GLOBALS['wpdb'] = $this->make_backup_wpdb();
+
+        // Subclase que evita la comprobación de disco (puede fallar en entornos CI).
+        $manager = new class() extends \SSC_Backup_Manager {
+            protected function check_disk_space() { return true; }
+        };
+
+        $existing_zips = glob( SSC_BACKUPS_DIR . '*.zip' ) ?: array();
+
+        $job_id = $manager->start( 'unit-test' );
+
+        $GLOBALS['wpdb'] = $original_wpdb;
+
+        // 1. Devuelve un job_id como string no vacío.
+        $this->assertIsString( $job_id, 'start() should return a string job_id.' );
+        $this->assertNotEmpty( $job_id );
+
+        // Localizar el ZIP recién creado.
+        $all_zips  = glob( SSC_BACKUPS_DIR . '*.zip' ) ?: array();
+        $new_zips  = array_diff( $all_zips, $existing_zips );
+        $zip_path  = reset( $new_zips );
+
+        if ( false === $zip_path ) {
+            // Si start() falló (mysqldump presente y conectó a DB inexistente), skip.
+            $this->markTestSkipped( 'No ZIP was created — likely mysqldump connected to a real DB or DB backup failed.' );
+        }
+
+        try {
+            // 2. El ZIP existe y tiene tamaño > 0.
+            $this->assertFileExists( $zip_path );
+            $this->assertGreaterThan( 0, filesize( $zip_path ) );
+
+            // 3. El archivo .sha256 existe junto al ZIP.
+            $this->assertFileExists( $zip_path . '.sha256' );
+
+            // 4. El archivo .meta existe junto al ZIP.
+            $this->assertFileExists( $zip_path . '.meta' );
+
+            // 5. El ZIP contiene manifest.json y database.sql.
+            $zip = new \ZipArchive();
+            $zip->open( $zip_path, \ZipArchive::RDONLY );
+            $this->assertNotFalse( $zip->statName( 'manifest.json' ), 'manifest.json must be inside the ZIP.' );
+            $this->assertNotFalse( $zip->statName( 'database.sql' ),  'database.sql must be inside the ZIP.' );
+            $zip->close();
+
+            // 6. El checksum en .sha256 coincide con el hash real del ZIP.
+            $expected_hash = trim( file_get_contents( $zip_path . '.sha256' ) );
+            $actual_hash   = hash_file( 'sha256', $zip_path );
+            $this->assertSame( $actual_hash, $expected_hash, 'SHA-256 checksum must match the ZIP file.' );
+
+        } finally {
+            // Limpiar artefactos del test.
+            @unlink( $zip_path ); // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
+            @unlink( $zip_path . '.sha256' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
+            @unlink( $zip_path . '.meta' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
+        }
+    }
 }

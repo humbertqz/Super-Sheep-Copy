@@ -10,7 +10,9 @@ declare( strict_types=1 );
 
 // ── Constantes de WordPress — deben definirse antes de cargar los stubs ──────
 if ( ! defined( 'ABSPATH' ) ) {
-    define( 'ABSPATH', sys_get_temp_dir() . '/ssc-test-abspath/' );
+    // Usar realpath() para evitar que los symlinks del sistema (ej. /tmp → /private/tmp en macOS)
+    // rompan la comparación de rutas dentro de SSC_Files_Backup.
+    define( 'ABSPATH', ( realpath( sys_get_temp_dir() ) ?: sys_get_temp_dir() ) . '/ssc-test-abspath/' );
 }
 
 // ── Autoloader de Composer ────────────────────────────────────────────────────
@@ -26,7 +28,7 @@ define( 'SSC_MIN_WP',      '6.0' );
 define( 'SSC_PLUGIN_FILE', dirname( __DIR__ ) . '/super-sheep-copy.php' );
 define( 'SSC_PLUGIN_DIR',  dirname( __DIR__ ) . '/' );
 define( 'SSC_PLUGIN_URL',  'https://example.com/wp-content/plugins/ssc/' );
-define( 'SSC_BACKUPS_DIR', sys_get_temp_dir() . '/ssc-test-backups/' );
+define( 'SSC_BACKUPS_DIR', ( realpath( sys_get_temp_dir() ) ?: sys_get_temp_dir() ) . '/ssc-test-backups/' );
 if ( ! defined( 'WP_CONTENT_DIR' ) ) {
     define( 'WP_CONTENT_DIR', ABSPATH . 'wp-content' );
 }

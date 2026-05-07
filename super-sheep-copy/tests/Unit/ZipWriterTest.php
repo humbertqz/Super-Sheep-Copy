@@ -139,4 +139,41 @@ class ZipWriterTest extends TestCase {
         // Devuelve true (no aborta el backup por un archivo no legible).
         $this->assertTrue( $result );
     }
+
+    // ── Integridad del archivo ZIP ────────────────────────────────────────────
+
+    /** @test */
+    public function zip_can_be_reopened_after_close(): void {
+        $zip_path = $this->work_dir . '/integrity.zip';
+        $writer   = new \SSC_Zip_Writer( $zip_path );
+        $writer->open();
+        $writer->add_from_string( 'data.txt', 'some data' );
+        $writer->close();
+
+        // Reabrir en modo lectura verifica que el ZIP no está corrupto.
+        $zip    = new \ZipArchive();
+        $opened = $zip->open( $zip_path, \ZipArchive::RDONLY );
+        $zip->close();
+
+        $this->assertTrue( $opened, 'ZIP should be openable after close (not corrupt).' );
+    }
+
+    /** @test */
+    public function zip_count_reflects_number_of_added_entries(): void {
+        $zip_path = $this->work_dir . '/count.zip';
+        $writer   = new \SSC_Zip_Writer( $zip_path );
+        $writer->open();
+        $writer->add_from_string( 'one.txt', 'a' );
+        $writer->add_from_string( 'two.txt', 'b' );
+        $writer->add_from_string( 'three.txt', 'c' );
+        $writer->close();
+
+        $zip   = new \ZipArchive();
+        $zip->open( $zip_path, \ZipArchive::RDONLY );
+        $count = $zip->count();
+        $zip->close();
+
+        $this->assertSame( 3, $count );
+        $this->assertSame( 3, $writer->get_file_count() );
+    }
 }
