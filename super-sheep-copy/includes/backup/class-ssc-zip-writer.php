@@ -110,9 +110,8 @@ class SSC_Zip_Writer {
 		}
 
 		if ( ! is_file( $real_path ) || ! is_readable( $real_path ) ) {
-			// Archivo no legible: advertir y continuar (no abortar el backup completo).
 			SSC_Logger::warn( 'zip_writer', 'Archivo no legible, omitido: ' . $real_path );
-			return true;
+			return new WP_Error( 'zip_file_not_readable', 'Archivo no legible, omitido: ' . $real_path );
 		}
 
 		$added = $this->zip->addFile( $real_path, $local_name );

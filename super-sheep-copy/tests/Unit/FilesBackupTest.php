@@ -302,6 +302,46 @@ class FilesBackupTest extends TestCase {
 		}
 	}
 
+	// ── run() — archivo no legible no debe contarse ──────────────────────────
+
+	/** @test */
+	public function test_run_does_not_count_unreadable_files(): void {
+		if ( function_exists( 'posix_getuid' ) && posix_getuid() === 0 ) {
+			$this->markTestSkipped( 'Los permisos de archivo no funcionan como root.' );
+		}
+
+		$uid       = uniqid( 'fbtest_' );
+		$good_file = ABSPATH . $uid . '_good.txt';
+		$bad_file  = ABSPATH . $uid . '_bad.txt';
+		file_put_contents( $good_file, 'readable' );
+		file_put_contents( $bad_file, 'unreadable' );
+		chmod( $bad_file, 0000 ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_chmod
+
+		[ $writer, $zip_path ] = $this->make_open_writer();
+		$backup = new \SSC_Files_Backup( $writer );
+		$backup->run();
+		$writer->close();
+
+		chmod( $bad_file, 0644 ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_chmod
+		@unlink( $good_file ); // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
+		@unlink( $bad_file );  // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
+
+		$zip_count = 0;
+		if ( file_exists( $zip_path ) ) {
+			$zip = new \ZipArchive();
+			if ( $zip->open( $zip_path, \ZipArchive::RDONLY ) === true ) {
+				$zip_count = $zip->count();
+				$zip->close();
+			}
+		}
+
+		$this->assertSame(
+			$zip_count,
+			$backup->get_file_count(),
+			'get_file_count() debe coincidir con ZipArchive::count() aunque haya archivos no legibles.'
+		);
+	}
+
 	// ── is_excluded() — directorio de respaldos ───────────────────────────────
 
 	/** @test */

@@ -136,8 +136,9 @@ class ZipWriterTest extends TestCase {
         $result = $writer->add_file( '/nonexistent/file.txt', 'file.txt' );
         $writer->close();
 
-        // Devuelve true (no aborta el backup por un archivo no legible).
-        $this->assertTrue( $result );
+        // Devuelve WP_Error (no aborta el backup — el llamador usa continue y no incrementa su contador).
+        $this->assertInstanceOf( \WP_Error::class, $result );
+        $this->assertSame( 'zip_file_not_readable', $result->get_error_code() );
     }
 
     // ── Integridad del archivo ZIP ────────────────────────────────────────────

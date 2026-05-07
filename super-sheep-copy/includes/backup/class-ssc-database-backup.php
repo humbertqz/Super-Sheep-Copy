@@ -79,7 +79,7 @@ class SSC_Database_Backup {
 	 *
 	 * @return bool
 	 */
-	private function is_mysqldump_available(): bool {
+	protected function is_mysqldump_available(): bool {
 		if ( ! function_exists( 'shell_exec' ) ) {
 			return false;
 		}

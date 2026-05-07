@@ -263,6 +263,69 @@ class DatabaseBackupTest extends TestCase {
         $this->assertStringContainsString( "'Second Post'", $sql );
     }
 
+    // ── run() — vía PHP (is_mysqldump_available sobreescrita) ─────────────────
+
+    /**
+     * Subclase que fuerza la ruta PHP sin necesitar mysqldump en el sistema.
+     */
+    private function make_no_mysqldump( string $sql_file ): \SSC_Database_Backup {
+        return new class( $sql_file ) extends \SSC_Database_Backup {
+            protected function is_mysqldump_available(): bool { return false; }
+        };
+    }
+
+    /** @test */
+    public function test_run_uses_php_fallback_and_produces_sql_file(): void {
+        $sql_file = tempnam( sys_get_temp_dir(), 'ssc_db_run_' );
+        @unlink( $sql_file ); // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
+
+        $original_wpdb   = $GLOBALS['wpdb'];
+        $GLOBALS['wpdb'] = $this->make_wpdb_stub( array( 'wp_options' ), array() );
+
+        $backup = $this->make_no_mysqldump( $sql_file );
+        $result = $backup->run();
+
+        $GLOBALS['wpdb'] = $original_wpdb;
+
+        $this->assertTrue( $result );
+        $this->assertFileExists( $sql_file );
+        $this->assertGreaterThan( 0, filesize( $sql_file ) );
+
+        @unlink( $sql_file ); // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
+    }
+
+    /** @test */
+    public function test_run_returns_wp_error_when_no_tables_found(): void {
+        $sql_file = tempnam( sys_get_temp_dir(), 'ssc_db_run_' );
+        @unlink( $sql_file ); // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
+
+        $original_wpdb   = $GLOBALS['wpdb'];
+        $GLOBALS['wpdb'] = $this->make_wpdb_stub( array(), array() ); // lista de tablas vacía
+
+        $backup = $this->make_no_mysqldump( $sql_file );
+        $result = $backup->run();
+
+        $GLOBALS['wpdb'] = $original_wpdb;
+        @unlink( $sql_file ); // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
+
+        $this->assertInstanceOf( \WP_Error::class, $result );
+        $this->assertSame( 'no_tables', $result->get_error_code() );
+    }
+
+    /** @test */
+    public function test_run_returns_wp_error_when_output_file_is_unwriteable(): void {
+        $original_wpdb   = $GLOBALS['wpdb'];
+        $GLOBALS['wpdb'] = $this->make_wpdb_stub( array( 'wp_posts' ), array() );
+
+        $backup = $this->make_no_mysqldump( '/root/nonexistent_dir/output.sql' );
+        $result = $backup->run();
+
+        $GLOBALS['wpdb'] = $original_wpdb;
+
+        $this->assertInstanceOf( \WP_Error::class, $result );
+        $this->assertSame( 'cannot_open_output', $result->get_error_code() );
+    }
+
     /** @test */
     public function dump_via_php_paginates_tables_with_more_than_500_rows(): void {
         $sql_file = tempnam( sys_get_temp_dir(), 'ssc_db_test_' );
