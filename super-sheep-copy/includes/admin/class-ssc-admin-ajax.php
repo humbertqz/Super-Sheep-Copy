@@ -29,6 +29,7 @@ class SSC_Admin_Ajax {
 		// AJAX (respuesta JSON).
 		$ajax_actions = array(
 			'ssc_create_backup',
+			'ssc_continue_backup',
 			'ssc_get_backup_status',
 			'ssc_delete_backup',
 			'ssc_restore_backup',
@@ -70,6 +71,9 @@ class SSC_Admin_Ajax {
 			case 'ssc_create_backup':
 				$this->handle_create_backup();
 				break;
+			case 'ssc_continue_backup':
+				$this->handle_continue_backup();
+				break;
 			case 'ssc_get_backup_status':
 				$this->handle_get_backup_status();
 				break;
@@ -96,28 +100,21 @@ class SSC_Admin_Ajax {
 	// ── Handlers AJAX ─────────────────────────────────────────────────────────
 
 	/**
-	 * Inicia la creación de un nuevo respaldo.
+	 * Inicia la fase de inicialización del respaldo resumable (chunked).
 	 *
-	 * Envía el job_id al navegador inmediatamente (cerrando la conexión HTTP vía
-	 * fastcgi_finish_request) y ejecuta el respaldo en segundo plano. El cliente
-	 * debe hacer polling a ssc_get_backup_status para conocer el resultado.
+	 * Ejecuta el volcado de BD y el escaneo de archivos de forma síncrona,
+	 * devuelve el job_id al navegador y deja el empaquetado de archivos para
+	 * las llamadas sucesivas a ssc_continue_backup.
 	 *
 	 * @return void
 	 */
 	private function handle_create_backup(): void {
-		// Rechazar si ya hay un respaldo en curso antes de enviar respuesta.
 		if ( get_transient( 'ssc_backup_running' ) ) {
-			$this->send_json_clean( false, array( 'message' => __( 'Ya hay un respaldo en curso. Inténtalo de nuevo en unos minutos.', 'super-sheep-copy' ) ) );
+			wp_send_json_error( array( 'message' => __( 'Ya hay un respaldo en curso.', 'super-sheep-copy' ) ) );
 		}
 
 		$label  = isset( $_POST['label'] ) ? sanitize_text_field( wp_unslash( $_POST['label'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing
 		$job_id = substr( md5( uniqid( 'ssc_', true ) ), 0, 16 );
-
-		// Pre-asignar el lock anti-concurrencia ANTES de enviar la respuesta HTTP.
-		// Esto cierra la ventana de condición de carrera donde dos peticiones
-		// simultáneas podrían pasar el check inicial antes de que start() llame
-		// a acquire_lock(). El método acquire_lock() reconoce y acepta este lock.
-		set_transient( 'ssc_backup_running', $job_id, SSC_Backup_Manager::LOCK_TTL );
 
 		// Estado inicial en el transient para que el primer poll tenga algo que leer.
 		set_transient(
@@ -130,28 +127,39 @@ class SSC_Admin_Ajax {
 			SSC_Backup_Manager::STATE_TTL
 		);
 
-		// Enviar job_id al navegador y cerrar la conexión HTTP ahora.
-		// PHP sigue ejecutando el respaldo en segundo plano.
-		$this->send_json_and_continue( true, array( 'job_id' => $job_id ) );
-
-		// ── Desde aquí la respuesta HTTP ya fue enviada ───────────────────────
-		// Reconnect to DB — fastcgi_finish_request() can close the MySQL socket.
-		global $wpdb;
-		$wpdb->check_connection( false );
-
-		ob_start();
 		$manager = new SSC_Backup_Manager();
-		$result  = $manager->start( $label, 'manual', $job_id );
-		$stray   = ob_get_clean();
-		if ( $stray ) {
-			SSC_Logger::warn( 'create_backup', 'Salida inesperada durante el respaldo: ' . substr( wp_strip_all_tags( $stray ), 0, 300 ) );
-		}
+		$result  = $manager->init( $label, 'manual', $job_id );
 
 		if ( is_wp_error( $result ) ) {
 			SSC_Logger::error( 'create_backup', $result->get_error_message() );
+			wp_send_json_error( array( 'message' => $result->get_error_message() ) );
 		}
 
-		die();
+		wp_send_json_success( array( 'job_id' => $job_id ) );
+	}
+
+	/**
+	 * Avanza el respaldo chunked procesando el siguiente lote de archivos.
+	 *
+	 * El cliente JS llama a este endpoint secuencialmente hasta que el estado
+	 * devuelto contenga status === 'completed' o status === 'failed'.
+	 *
+	 * @return void
+	 */
+	private function handle_continue_backup(): void {
+		$job_id = isset( $_POST['job_id'] ) ? sanitize_key( $_POST['job_id'] ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing
+		if ( ! $job_id ) {
+			wp_send_json_error( array( 'message' => __( 'job_id requerido.', 'super-sheep-copy' ) ), 400 );
+		}
+
+		$manager = new SSC_Backup_Manager();
+		$result  = $manager->advance( $job_id );
+
+		if ( is_wp_error( $result ) ) {
+			wp_send_json_error( array( 'message' => $result->get_error_message() ) );
+		}
+
+		wp_send_json_success( $result );
 	}
 
 	/**

@@ -73,6 +73,132 @@ class SSC_Files_Backup {
 	// ── API pública ───────────────────────────────────────────────────────────
 
 	/**
+	 * Recorre ABSPATH, aplica exclusiones y escribe la lista de rutas absolutas
+	 * en un archivo JSON para uso posterior por run_batch().
+	 *
+	 * @param string $list_file Ruta absoluta al archivo JSON de destino.
+	 * @return int|WP_Error  Número de archivos escaneados, o WP_Error si falla la escritura.
+	 */
+	public function scan( string $list_file ) {
+		$abspath = rtrim( ABSPATH, '/\\' );
+		$paths   = array();
+
+		try {
+			$dir_iterator = new RecursiveDirectoryIterator(
+				$abspath,
+				RecursiveDirectoryIterator::SKIP_DOTS | RecursiveDirectoryIterator::FOLLOW_SYMLINKS
+			);
+			$iterator = new RecursiveIteratorIterator(
+				$dir_iterator,
+				RecursiveIteratorIterator::SELF_FIRST
+			);
+		} catch ( \Exception $e ) {
+			return new WP_Error( 'scan_iterator_failed', $e->getMessage() );
+		}
+
+		foreach ( $iterator as $file ) {
+			/** @var SplFileInfo $file */
+			if ( ! $file->isFile() ) {
+				continue;
+			}
+
+			$real_path = $file->getRealPath();
+			if ( false === $real_path ) {
+				continue;
+			}
+
+			if ( $this->is_excluded( $real_path ) ) {
+				continue;
+			}
+
+			$paths[] = $real_path;
+		}
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
+		$written = file_put_contents( $list_file, wp_json_encode( $paths ) );
+		if ( false === $written ) {
+			return new WP_Error(
+				'scan_write_failed',
+				sprintf(
+					/* translators: %s: file path */
+					__( 'No se pudo escribir la lista de archivos en: %s', 'super-sheep-copy' ),
+					$list_file
+				)
+			);
+		}
+
+		$count = count( $paths );
+		SSC_Logger::info(
+			'files_backup',
+			sprintf( 'Lista de archivos escaneada: %d archivos.', $count )
+		);
+
+		return $count;
+	}
+
+	/**
+	 * Añade al ZIP un lote de archivos desde la lista JSON.
+	 *
+	 * El límite es por conteo de archivos, no por tiempo, porque ZipArchive::addFile()
+	 * es lazy: la compresión real ocurre en close(), fuera de este método. Un límite
+	 * de tiempo aquí no acotar el tiempo total de la llamada a advance().
+	 *
+	 * @param string $list_file  Ruta al archivo JSON generado por scan().
+	 * @param int    $offset     Índice del primer archivo a procesar en esta llamada.
+	 * @param int    $max_files  Máximo de archivos a encolar por lote (defecto: 500).
+	 * @return array|WP_Error   Resultado del lote o WP_Error en caso de fallo crítico.
+	 */
+	public function run_batch( string $list_file, int $offset, int $max_files = 500 ) {
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+		$raw   = file_get_contents( $list_file );
+		$paths = $raw ? json_decode( $raw, true ) : null;
+
+		if ( ! is_array( $paths ) ) {
+			return new WP_Error(
+				'batch_no_list',
+				sprintf(
+					/* translators: %s: file path */
+					__( 'No se pudo leer la lista de archivos desde: %s', 'super-sheep-copy' ),
+					$list_file
+				)
+			);
+		}
+
+		$abspath = rtrim( ABSPATH, '/\\' );
+		$total   = count( $paths );
+		$i       = $offset;
+		$added   = 0;
+
+		while ( $i < $total && $added < $max_files ) {
+			$real_path  = $paths[ $i ];
+			$local_name = ltrim( str_replace( $abspath, '', $real_path ), '/\\' );
+			$local_name = str_replace( '\\', '/', $local_name );
+
+			$result = $this->zip->add_file( $real_path, $local_name );
+			if ( is_wp_error( $result ) ) {
+				SSC_Logger::warn( 'files_backup', $result->get_error_message() );
+			} else {
+				++$this->file_count;
+				++$added;
+			}
+
+			++$i;
+		}
+
+		SSC_Logger::info(
+			'files_backup',
+			sprintf( 'Lote procesado: %d archivos añadidos (offset %d → %d de %d).', $added, $offset, $i, $total )
+		);
+
+		return array(
+			'done'         => $i >= $total,
+			'next_offset'  => $i,
+			'files_added'  => $added,
+			'total'        => $total,
+		);
+	}
+
+	/**
 	 * Recorre el sistema de archivos y añade todo al ZIP.
 	 *
 	 * @return true|WP_Error

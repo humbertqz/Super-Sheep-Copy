@@ -6,7 +6,7 @@
   var currentJobId = null;
   var pollInterval = null;
   var pollDelay = 2000; // ms entre polls de estado
-  var pollMaxMs = 900000; // 15 min — tras este tiempo de polling sin respuesta final, mostrar aviso
+  var pollMaxMs = 1800000; // 30 min — tras este tiempo de polling sin respuesta final, mostrar aviso
   var simulateInterval = null; // temporizador de progreso simulado
   var simulatedPercent = 0;
 
@@ -51,17 +51,16 @@
       label: "",
     })
       .done(function (response) {
-        if (response.success && response.data && response.data.job_id) {
-          // Job aceptado — el servidor ya cerró la conexión HTTP y ejecuta
-          // el respaldo en segundo plano. Hacemos polling hasta completar.
-          startPolling(
+        if (response && response.success && response.data && response.data.job_id) {
+          // Init completado — encadenar las llamadas continue secuencialmente.
+          stopSimulation();
+          startBackupChain(
             response.data.job_id,
-            "ssc_get_backup_status",
             function () {
               finishProgress(
                 "#ssc-progress-bar",
                 "#ssc-progress-label",
-                sscData.strings.done || "Respaldo completado.",
+                sscData.strings.done || "¡Listo!",
               );
               setTimeout(function () {
                 hideProgress("#ssc-progress-wrap");
@@ -69,76 +68,106 @@
               }, 1200);
             },
             function (msg, lostContact) {
-              stopSimulation();
               hideProgress("#ssc-progress-wrap");
               if (lostContact) {
                 showWarning(msg);
-                // No re-habilitar el botón: el proceso puede seguir en segundo plano.
+                setTimeout(function () { window.location.reload(); }, 5000);
               } else {
                 showError(msg);
                 $("#ssc-create-backup").prop("disabled", false);
               }
             },
           );
-        } else if (sscData.runningBackupJobId) {
-          // Servidor rechazó porque ya hay un respaldo en curso.
-          // En vez de mostrar error, adjuntarse al job existente.
-          $("#ssc-progress-label").text(
-            sscData.strings.backupInProgress || "Respaldo en curso…",
-          );
-          startPolling(
-            sscData.runningBackupJobId,
-            "ssc_get_backup_status",
-            function () {
-              finishProgress(
-                "#ssc-progress-bar",
-                "#ssc-progress-label",
-                sscData.strings.done || "Respaldo completado.",
-              );
-              setTimeout(function () {
-                hideProgress("#ssc-progress-wrap");
-                window.location.reload();
-              }, 1200);
-            },
-            function (msg, lostContact) {
-              stopSimulation();
-              hideProgress("#ssc-progress-wrap");
-              if (lostContact) {
-                showWarning(msg);
-              } else {
-                showError(msg);
-                $("#ssc-create-backup").prop("disabled", false);
-              }
-            },
-          );
-        } else if (
-          response &&
-          response.success === false &&
-          response.data &&
-          response.data.message
-        ) {
-          // Explicit server-side error (e.g. nonce failure, permission denied).
+        } else {
+          // Error explícito del servidor o respuesta sin job_id.
           stopSimulation();
           hideProgress("#ssc-progress-wrap");
-          showError(response.data.message);
+          var msg =
+            response && response.data && response.data.message
+              ? response.data.message
+              : sscData.strings.error;
+          showError(msg);
           $("#ssc-create-backup").prop("disabled", false);
-        } else {
-          // Ambiguous response: fastcgi_finish_request() may have closed the
-          // connection before the full JSON reached jQuery, causing a parse
-          // error or empty body. The backup IS likely running in background.
-          // Try to discover the running job before showing any warning.
-          recoverRunningBackup();
         }
       })
       .fail(function () {
-        // ANY network/HTTP failure on the create-backup initiation is treated as
-        // ambiguous: fastcgi_finish_request() closes the socket early, which can
-        // cause the Apache proxy to return 500/502/504/0/408 even when the backup
-        // PHP process is running fine in background. Try to discover the running
-        // job silently before falling back to the warning + reload.
-        recoverRunningBackup();
+        stopSimulation();
+        hideProgress("#ssc-progress-wrap");
+        showError(sscData.strings.error);
+        $("#ssc-create-backup").prop("disabled", false);
       });
   });
+
+  /**
+   * Llama a ssc_continue_backup secuencialmente hasta que el respaldo termine.
+   *
+   * Cada llamada procesa un lote de archivos (~5 s) y la siguiente comienza
+   * inmediatamente al recibir la respuesta, evitando el límite de ejecución PHP.
+   *
+   * @param {string}   jobId      ID del job devuelto por ssc_create_backup.
+   * @param {Function} onComplete Callback cuando status === 'completed'.
+   * @param {Function} onFailed   Callback con (msg, lostContact) cuando falla.
+   */
+  function startBackupChain(jobId, onComplete, onFailed) {
+    currentJobId = jobId;
+    var failCount = 0;
+    var MAX_FAILS = 3;
+
+    function doNext() {
+      $.ajax({
+        url: sscData.ajaxUrl,
+        type: "POST",
+        data: {
+          action: "ssc_continue_backup",
+          nonce: sscData.nonce,
+          job_id: jobId,
+        },
+        timeout: 90000,
+      })
+        .done(function (response) {
+          failCount = 0;
+          if (!response || !response.success || !response.data) {
+            currentJobId = null;
+            onFailed(
+              (response && response.data && response.data.message) ||
+                sscData.strings.error,
+              false,
+            );
+            return;
+          }
+          var state = response.data;
+          if (state.percent !== undefined) {
+            setBarWidth("#ssc-progress-bar", state.percent);
+          }
+          if (state.message) {
+            $("#ssc-progress-label").text(state.message);
+          }
+          if ("completed" === state.status) {
+            currentJobId = null;
+            onComplete(state);
+          } else if ("failed" === state.status) {
+            currentJobId = null;
+            onFailed(state.message || sscData.strings.error, false);
+          } else {
+            doNext();
+          }
+        })
+        .fail(function () {
+          failCount++;
+          if (failCount >= MAX_FAILS) {
+            currentJobId = null;
+            onFailed(
+              sscData.strings.errorPollTimeout || sscData.strings.error,
+              true,
+            );
+          } else {
+            setTimeout(doNext, 3000);
+          }
+        });
+    }
+
+    doNext();
+  }
 
   // ── Eliminar respaldo ─────────────────────────────────────────────────
   $(document).on("click", ".ssc-delete-btn", function (e) {
@@ -625,44 +654,92 @@
     }, pollDelay);
   }
 
-  // ── Reanudar polling si había un job en curso al cargar la página ─────────
-  // Ocurre cuando: (a) el usuario recargó la página durante una operación,
-  // (b) el polling anterior falló por timeout de red pero PHP siguió corriendo.
+  // ── Reanudar cadena chunked si había un job de respaldo en curso al cargar ──
+  // Ocurre cuando el usuario recargó la página durante un respaldo en marcha.
   (function resumeRunningJobs() {
     if (sscData.runningBackupJobId) {
+      var jobId = sscData.runningBackupJobId;
       $("#ssc-create-backup").prop("disabled", true);
       $("#ssc-progress-wrap").show();
-      setBarWidth("#ssc-progress-bar", 90);
+      setBarWidth("#ssc-progress-bar", 25);
       $("#ssc-progress-bar").addClass("is-animating");
       $("#ssc-progress-label").text(
         sscData.strings.backupInProgress || "Respaldo en curso…",
       );
 
-      startPolling(
-        sscData.runningBackupJobId,
-        "ssc_get_backup_status",
-        function () {
-          finishProgress(
-            "#ssc-progress-bar",
-            "#ssc-progress-label",
-            sscData.strings.done || "¡Listo!",
-          );
-          setTimeout(function () {
-            hideProgress("#ssc-progress-wrap");
-            window.location.reload();
-          }, 1200);
-        },
-        function (msg, lostContact) {
-          stopSimulation();
-          hideProgress("#ssc-progress-wrap");
-          if (lostContact) {
-            showWarning(msg);
-          } else {
-            showError(msg);
-            $("#ssc-create-backup").prop("disabled", false);
+      // Comprobar el estado actual antes de retomar la cadena.
+      $.post(sscData.ajaxUrl, {
+        action: "ssc_get_backup_status",
+        nonce: sscData.nonce,
+        job_id: jobId,
+      })
+        .done(function (response) {
+          if (response && response.success && response.data) {
+            var state = response.data;
+            if ("completed" === state.status) {
+              window.location.reload();
+              return;
+            }
+            if ("failed" === state.status) {
+              hideProgress("#ssc-progress-wrap");
+              showError(state.message || sscData.strings.error);
+              $("#ssc-create-backup").prop("disabled", false);
+              return;
+            }
           }
-        },
-      );
+          // En curso (o estado desconocido) — reanudar cadena chunked.
+          startBackupChain(
+            jobId,
+            function () {
+              finishProgress(
+                "#ssc-progress-bar",
+                "#ssc-progress-label",
+                sscData.strings.done || "¡Listo!",
+              );
+              setTimeout(function () {
+                hideProgress("#ssc-progress-wrap");
+                window.location.reload();
+              }, 1200);
+            },
+            function (msg, lostContact) {
+              hideProgress("#ssc-progress-wrap");
+              if (lostContact) {
+                showWarning(msg);
+                setTimeout(function () { window.location.reload(); }, 5000);
+              } else {
+                showError(msg);
+                $("#ssc-create-backup").prop("disabled", false);
+              }
+            },
+          );
+        })
+        .fail(function () {
+          // Sin respuesta — intentar reanudar igualmente.
+          startBackupChain(
+            jobId,
+            function () {
+              finishProgress(
+                "#ssc-progress-bar",
+                "#ssc-progress-label",
+                sscData.strings.done || "¡Listo!",
+              );
+              setTimeout(function () {
+                hideProgress("#ssc-progress-wrap");
+                window.location.reload();
+              }, 1200);
+            },
+            function (msg, lostContact) {
+              hideProgress("#ssc-progress-wrap");
+              if (lostContact) {
+                showWarning(msg);
+                setTimeout(function () { window.location.reload(); }, 5000);
+              } else {
+                showError(msg);
+                $("#ssc-create-backup").prop("disabled", false);
+              }
+            },
+          );
+        });
     }
 
     if (sscData.runningRestoreJobId) {
@@ -813,96 +890,6 @@
     $("#ssc-progress-label, #ssc-restore-progress-label").removeClass(
       "is-done",
     );
-  }
-
-  /**
-   * Intenta recuperarse cuando la respuesta de ssc_create_backup no llegó al
-   * navegador (p. ej. por buffering de proxy inverso o cierre prematuro del
-   * socket por fastcgi_finish_request). Consulta ssc_get_running_jobs para
-   * detectar si el respaldo se inició en background y, si es así, reanuda el
-   * polling sin mostrar ninguna advertencia. Solo como último recurso (si no
-   * encuentra ningún job en varios intentos) muestra la advertencia y recarga.
-   */
-  function recoverRunningBackup() {
-    var attempts = 0;
-    var MAX_ATTEMPTS = 5;
-
-    function check() {
-      $.post(sscData.ajaxUrl, {
-        action: "ssc_get_running_jobs",
-        nonce: sscData.nonce,
-      })
-        .done(function (response) {
-          if (
-            response &&
-            response.success &&
-            response.data &&
-            response.data.backup_job_id
-          ) {
-            // Job encontrado — reanudar polling sin mostrar advertencia.
-            $("#ssc-progress-label").text(
-              sscData.strings.backupInProgress || "Respaldo en curso…",
-            );
-            startPolling(
-              response.data.backup_job_id,
-              "ssc_get_backup_status",
-              function () {
-                finishProgress(
-                  "#ssc-progress-bar",
-                  "#ssc-progress-label",
-                  sscData.strings.done || "Respaldo completado.",
-                );
-                setTimeout(function () {
-                  hideProgress("#ssc-progress-wrap");
-                  window.location.reload();
-                }, 1200);
-              },
-              function (msg, lostContact) {
-                stopSimulation();
-                hideProgress("#ssc-progress-wrap");
-                if (lostContact) {
-                  showWarning(msg);
-                } else {
-                  showError(msg);
-                  $("#ssc-create-backup").prop("disabled", false);
-                }
-              },
-            );
-          } else if (attempts < MAX_ATTEMPTS) {
-            attempts++;
-            setTimeout(check, 2000);
-          } else {
-            // Ningún job activo tras varios intentos — mostrar advertencia.
-            stopSimulation();
-            hideProgress("#ssc-progress-wrap");
-            showWarning(
-              sscData.strings.errorPollTimeout || sscData.strings.error,
-            );
-            setTimeout(function () {
-              window.location.reload();
-            }, 4000);
-          }
-        })
-        .fail(function () {
-          if (attempts < MAX_ATTEMPTS) {
-            attempts++;
-            setTimeout(check, 2000);
-          } else {
-            stopSimulation();
-            hideProgress("#ssc-progress-wrap");
-            showWarning(
-              sscData.strings.errorPollTimeout || sscData.strings.error,
-            );
-            setTimeout(function () {
-              window.location.reload();
-            }, 4000);
-          }
-        });
-    }
-
-    // Esperar 1.5 s antes de la primera consulta para dar tiempo al servidor
-    // a escribir el transient antes de intentar leerlo.
-    setTimeout(check, 1500);
   }
 
   function showError(message) {

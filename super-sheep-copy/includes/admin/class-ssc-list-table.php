@@ -107,6 +107,11 @@ class SSC_List_Table extends WP_List_Table {
 	/**
 	 * Lee y construye la lista de archivos de respaldo.
 	 *
+	 * Limpia automáticamente ZIPs huérfanos (sin archivo .meta) cuando no hay
+	 * ningún respaldo activo. Un ZIP sin .meta es un respaldo incompleto: el
+	 * proceso PHP fue interrumpido antes de escribir el .meta final, dejando
+	 * un ZIP parcial que NO puede restaurarse (carece de manifest.json interno).
+	 *
 	 * @return array
 	 */
 	private function get_backup_files(): array {
@@ -121,33 +126,47 @@ class SSC_List_Table extends WP_List_Table {
 			return $items;
 		}
 
+		// Si hay un respaldo en curso, no tocar ZIPs sin .meta (podría ser el actual).
+		$active_lock = get_transient( 'ssc_backup_running' );
+
 		foreach ( $files as $file ) {
-			$filename = basename( $file );
-			$mtime    = filemtime( $file );
-			$size     = filesize( $file );
+			$filename  = basename( $file );
+			$meta_file = $file . '.meta';
+			$sha_file  = $file . '.sha256';
+
+			if ( ! file_exists( $meta_file ) ) {
+				if ( $active_lock ) {
+					// Respaldo en curso — este ZIP puede estar escribiéndose ahora mismo.
+					continue;
+				}
+				// Sin respaldo activo: intentar generar .meta desde manifest.json interno.
+				// Esto permite que ZIPs copiados manualmente aparezcan en la lista.
+				if ( ! $this->try_generate_meta_from_zip( $file, $meta_file ) ) {
+					// ZIP sin manifest.json → realmente incompleto, omitir sin borrar.
+					SSC_Logger::warn( 'list_table', 'ZIP sin .meta ni manifest interno, omitiendo: ' . $filename );
+					continue;
+				}
+				// .meta generado — continuar con la lectura normal de metadatos.
+			}
+
+			$mtime = filemtime( $file );
+			$size  = filesize( $file );
 
 			// Leer checksum si existe.
-			$sha_file = $file . '.sha256';
 			$checksum = '';
 			if ( file_exists( $sha_file ) ) {
 				$raw      = file_get_contents( $sha_file ); // phpcs:ignore WordPress.WP.AlternativeFunctions
 				$checksum = $raw ? substr( trim( $raw ), 0, 8 ) . '…' : '';
 			}
 
-			// Leer tipo desde .meta si existe; si no, inferir del nombre.
+			// Leer tipo y etiqueta desde .meta.
 			$type  = 'manual';
 			$label = '';
-			$meta_file = $file . '.meta';
-			if ( file_exists( $meta_file ) ) {
-				$meta_raw = file_get_contents( $meta_file ); // phpcs:ignore WordPress.WP.AlternativeFunctions
-				$meta     = $meta_raw ? json_decode( $meta_raw, true ) : array();
-				if ( is_array( $meta ) ) {
-					$type  = $meta['type']  ?? 'manual';
-					$label = $meta['label'] ?? '';
-				}
-			} elseif ( false !== strpos( $filename, 'pre-restore' ) ) {
-				// Fallback para respaldos creados antes de implementar .meta.
-				$type = 'pre-restore';
+			$meta_raw = file_get_contents( $meta_file ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+			$meta     = $meta_raw ? json_decode( $meta_raw, true ) : array();
+			if ( is_array( $meta ) ) {
+				$type  = $meta['type']  ?? 'manual';
+				$label = $meta['label'] ?? '';
 			}
 
 			$items[] = array(
@@ -162,6 +181,51 @@ class SSC_List_Table extends WP_List_Table {
 		}
 
 		return $items;
+	}
+
+	/**
+	 * Intenta generar un .meta leyendo manifest.json desde el interior del ZIP.
+	 *
+	 * Permite que ZIPs copiados manualmente (sin su .meta sidecar) aparezcan en la
+	 * lista sin necesidad de ser re-creados. Si el ZIP no contiene manifest.json
+	 * (respaldo incompleto) devuelve false sin modificar nada.
+	 *
+	 * @param string $zip_path  Ruta absoluta al archivo ZIP.
+	 * @param string $meta_file Ruta absoluta donde escribir el .meta generado.
+	 * @return bool True si se generó el .meta, false si no fue posible.
+	 */
+	private function try_generate_meta_from_zip( string $zip_path, string $meta_file ): bool {
+		$zip = new ZipArchive();
+		if ( true !== $zip->open( $zip_path ) ) {
+			return false;
+		}
+
+		$json = $zip->getFromName( 'manifest.json' );
+		$zip->close();
+
+		if ( false === $json ) {
+			return false;
+		}
+
+		$manifest = json_decode( $json, true );
+		if ( ! is_array( $manifest ) ) {
+			return false;
+		}
+
+		$meta = array(
+			'type'       => 'manual',
+			'label'      => '',
+			'created_at' => $manifest['created_at'] ?? gmdate( 'Y-m-d\TH:i:s\Z' ),
+		);
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
+		$written = file_put_contents( $meta_file, wp_json_encode( $meta ) );
+		if ( false === $written ) {
+			return false;
+		}
+
+		SSC_Logger::info( 'list_table', 'Meta generado automáticamente desde manifest interno: ' . basename( $zip_path ) );
+		return true;
 	}
 
 	/**
