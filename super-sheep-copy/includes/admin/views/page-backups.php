@@ -46,6 +46,9 @@ if ( $last_mtime > 0 ) {
 ?>
 <div class="wrap ssc-wrap ssc-plugin-page ssc-backups-page">
 
+	<!-- WP notices anchor: keeps admin_notices above the branded header -->
+	<h1 class="screen-reader-text"><?php esc_html_e( 'Super Sheep Copy', 'super-sheep-copy' ); ?></h1>
+
 	<!-- Zona de avisos dinámicos -->
 	<div id="ssc-notices">
 		<?php

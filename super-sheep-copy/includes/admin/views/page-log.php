@@ -31,6 +31,9 @@ $has_content = ! empty( $summaries ) || ! empty( $ungrouped );
 ?>
 <div class="wrap ssc-wrap ssc-plugin-page ssc-log-page">
 
+	<!-- WP notices anchor: keeps admin_notices above the branded header -->
+	<h1 class="screen-reader-text"><?php esc_html_e( 'Super Sheep Copy', 'super-sheep-copy' ); ?></h1>
+
 	<!-- Page header -->
 	<div class="ssc-page-header">
 		<div class="ssc-brand">
