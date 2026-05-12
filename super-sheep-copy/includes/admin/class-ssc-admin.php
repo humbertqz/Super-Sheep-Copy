@@ -18,11 +18,11 @@ if ( ! defined( 'ABSPATH' ) ) {
 class SSC_Admin {
 
 	/**
-	 * Sufijo de página devuelto por add_menu_page (para condicionar assets).
+	 * Hook suffixes devueltos por add_menu_page / add_submenu_page.
 	 *
-	 * @var string
+	 * @var string[]
 	 */
-	private string $page_hook = '';
+	private array $page_hooks = [];
 
 	/**
 	 * Registra los hooks de WordPress necesarios.
@@ -97,7 +97,7 @@ class SSC_Admin {
 	 * @return void
 	 */
 	public function register_menus(): void {
-		$this->page_hook = add_menu_page(
+		$this->page_hooks[] = add_menu_page(
 			__( 'Super Sheep Copy', 'super-sheep-copy' ),
 			__( 'Respaldos', 'super-sheep-copy' ),
 			SSC_Capabilities::CAP,
@@ -117,7 +117,7 @@ class SSC_Admin {
 			array( $this, 'render_backups_page' )
 		);
 
-		add_submenu_page(
+		$this->page_hooks[] = add_submenu_page(
 			'super-sheep-copy',
 			__( 'Restaurar', 'super-sheep-copy' ),
 			__( 'Restaurar', 'super-sheep-copy' ),
@@ -126,7 +126,7 @@ class SSC_Admin {
 			array( $this, 'render_restore_page' )
 		);
 
-		add_submenu_page(
+		$this->page_hooks[] = add_submenu_page(
 			'super-sheep-copy',
 			__( 'Ajustes', 'super-sheep-copy' ),
 			__( 'Ajustes', 'super-sheep-copy' ),
@@ -135,7 +135,7 @@ class SSC_Admin {
 			array( $this, 'render_settings_page' )
 		);
 
-		add_submenu_page(
+		$this->page_hooks[] = add_submenu_page(
 			'super-sheep-copy',
 			__( 'Log', 'super-sheep-copy' ),
 			__( 'Log', 'super-sheep-copy' ),
@@ -154,14 +154,7 @@ class SSC_Admin {
 	 * @return void
 	 */
 	public function enqueue_assets( string $hook_suffix ): void {
-		$ssc_pages = array(
-			$this->page_hook,
-			'respaldos_page_ssc-restore',
-			'respaldos_page_ssc-settings',
-			'respaldos_page_ssc-log',
-		);
-
-		if ( ! in_array( $hook_suffix, $ssc_pages, true ) ) {
+		if ( ! in_array( $hook_suffix, $this->page_hooks, true ) ) {
 			return;
 		}
 
