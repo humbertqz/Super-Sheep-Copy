@@ -398,10 +398,12 @@
         ) {
           // Job aceptado — el servidor ya cerró la conexión HTTP y ejecuta
           // la restauración en segundo plano. Hacemos polling hasta completar.
+          if (window._sscShowCancelBtn) { window._sscShowCancelBtn(response.data.job_id); }
           startPolling(
             response.data.job_id,
             "ssc_get_restore_status",
             function () {
+              if (window._sscHideCancelBtn) { window._sscHideCancelBtn(); }
               finishProgress(
                 "#ssc-progress-bar",
                 "#ssc-progress-label",
@@ -413,6 +415,7 @@
               }, 1000);
             },
             function (msg, lostContact) {
+              if (window._sscHideCancelBtn) { window._sscHideCancelBtn(); }
               stopSimulation();
               hideProgress("#ssc-progress-wrap");
               // Para restauración, perder contacto con el polling es señal
@@ -758,6 +761,7 @@
         sscData.runningRestoreJobId,
         "ssc_get_restore_status",
         function () {
+          if (window._sscHideCancelBtn) { window._sscHideCancelBtn(); }
           finishProgress(
             "#ssc-progress-bar",
             "#ssc-progress-label",
@@ -769,6 +773,7 @@
           }, 1000);
         },
         function (msg, lostContact) {
+          if (window._sscHideCancelBtn) { window._sscHideCancelBtn(); }
           stopSimulation();
           hideProgress("#ssc-progress-wrap");
           if (lostContact) {
@@ -948,4 +953,53 @@
     $modal.removeAttr("hidden").css("display", "flex");
     $("#ssc-restore-done-login").trigger("focus");
   }
+
+  // ── Cancelar restauración atascada ─────────────────────────────────────
+
+  function showCancelButton(jobId) {
+    $(".ssc-cancel-restore-btn").data("job-id", jobId).show();
+  }
+
+  function hideCancelButton() {
+    $(".ssc-cancel-restore-btn").hide();
+  }
+
+  $(document).on("click", ".ssc-cancel-restore-btn", function () {
+    if (
+      !confirm(
+        "¿Cancelar la restauración en curso? Se eliminarán los bloqueos y el modo mantenimiento.",
+      )
+    ) {
+      return;
+    }
+
+    var jobId = $(this).data("job-id") || currentJobId || sscData.runningRestoreJobId || "";
+    var $btn = $(this).prop("disabled", true).text("Cancelando…");
+
+    stopSimulation();
+
+    $.post(sscData.ajaxUrl, {
+      action: "ssc_cancel_restore",
+      nonce: sscData.nonce,
+      job_id: jobId,
+    })
+      .always(function () {
+        hideCancelButton();
+        hideProgress("#ssc-progress-wrap");
+        hideProgress("#ssc-restore-progress-wrap");
+        $btn.prop("disabled", false);
+        showWarning(
+          "Restauración cancelada. El sitio puede quedar en estado parcial — revisa el log.",
+        );
+      });
+  });
+
+  // Mostrar botón de cancelar al reanudar polling de restauración en curso.
+  if (sscData.runningRestoreJobId) {
+    showCancelButton(sscData.runningRestoreJobId);
+  }
+
+  // Exponer para que startPolling pueda mostrarlo al iniciar una restauración.
+  window._sscShowCancelBtn = showCancelButton;
+  window._sscHideCancelBtn = hideCancelButton;
 })(jQuery);

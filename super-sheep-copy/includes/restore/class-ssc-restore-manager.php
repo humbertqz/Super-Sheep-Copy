@@ -104,11 +104,12 @@ class SSC_Restore_Manager {
 
 		$tmp_dir = WP_CONTENT_DIR . '/uploads/ssc-tmp-' . $this->job_id;
 
-		// Capturar la URL del sitio destino ANTES de importar la DB.
-		// Tras el import, get_site_url() devolvería la URL del backup y
-		// la comparación fallaría, saltándose la reescritura.
+		// Capturar URL y credenciales de BD del sitio destino ANTES de que la restauración
+		// de archivos sobreescriba wp-config.php. Si se capturaran después, reflejarían los
+		// valores del backup (servidor de origen), no los del servidor destino.
 		$current_url  = rtrim( get_site_url(), '/' );
 		$current_path = rtrim( ABSPATH, '/' );
+		$current_db   = $this->capture_db_credentials();
 
 		try {
 			// 4. Extracción de archivos.
@@ -118,6 +119,21 @@ class SSC_Restore_Manager {
 			if ( is_wp_error( $result ) ) {
 				throw new \RuntimeException( $result->get_error_message() );
 			}
+
+			// 4a. Reescribir wp-config.php restaurado: URL constants, SSL flags y credenciales DB.
+			// Las constantes PHP prevalecen sobre la DB; sin este paso el sitio queda con
+			// los valores del servidor de origen (HTTPS incorrecto, BD inaccesible, etc.).
+			if ( $overwrite_wp_config ) {
+				$this->rewrite_wp_config_constants( $current_url, $current_db );
+			}
+
+			// 4b-pre. Eliminar drop-ins de caché con rutas absolutas del servidor origen.
+			// Archivos como advanced-cache.php y advanced-headers.php son auto-generados
+			// por plugins de caché y contienen rutas absolutas hardcodeadas del servidor
+			// de producción. En el servidor destino esas rutas no existen y PHP lanza un
+			// Fatal Error al intentar cargar WordPress. Los plugins regeneran estos archivos
+			// en la primera carga del admin, por lo que eliminarlos es seguro.
+			$this->purge_cache_dropins();
 
 			// 4b. Preparar reemplazo diferido del propio plugin SSC si el respaldo incluye una versión distinta.
 			$self_update_result = SSC_Self_Updater::stage_from_zip( $zip_path, $this->job_id );
@@ -177,6 +193,10 @@ class SSC_Restore_Manager {
 		$this->update_state( 'running', __( 'Limpiando cache y reglas de reescritura…', 'super-sheep-copy' ), 90 );
 		$this->regenerate_htaccess_and_rules();
 		wp_cache_flush();
+		// Reescribir el transient de estado después del flush: en sitios con object cache
+		// (Redis/Memcached) wp_cache_flush() vacía la caché, borrando el transient. Sin
+		// este write, los polls vuelven a recibir "not found" hasta que se escribe 'completed'.
+		$this->update_state( 'running', __( 'Limpiando cache y reglas de reescritura…', 'super-sheep-copy' ), 90 );
 
 		// 8. Desactivar modo mantenimiento.
 		$this->disable_maintenance_mode();
@@ -412,6 +432,21 @@ class SSC_Restore_Manager {
 			$new_content = $wp_block . ( $existing !== '' ? "\n" . $existing : '' );
 		}
 
+		// Strip php_value auto_prepend_file / auto_append_file directives pointing to
+		// non-existent paths (written by caching plugins with production server paths).
+		// On Apache/mod_php these take effect at request start — "Unknown on line 0".
+		$new_content = preg_replace_callback(
+			'/^\s*php_value\s+(auto_(?:prepend|append)_file)\s+(\S+)/mi',
+			function ( $m ) {
+				$path = trim( $m[2], "\"' \t" );
+				if ( '' === $path || ! file_exists( $path ) ) {
+					return ''; // remove broken directive
+				}
+				return $m[0];
+			},
+			$new_content
+		);
+
 		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
 		$written = file_put_contents( $htaccess_path, $new_content );
 
@@ -500,6 +535,12 @@ class SSC_Restore_Manager {
 		// Asegurarse de que el lock de la restauración actual apunta a este job_id.
 		set_transient( 'ssc_restore_running', $this->job_id, self::LOCK_TTL );
 
+		// El import de DB reemplazó la tabla de opciones, borrando el transient de estado
+		// (la DB del respaldo no lo tenía). Sin esta línea, los polls del cliente reciben
+		// "job no encontrado" y MAX_NOT_FOUND dispara el modal de "completado" de forma
+		// prematura, antes de que PHP haya desactivado el modo mantenimiento.
+		$this->update_state( 'running', __( 'Importando base de datos…', 'super-sheep-copy' ), 60 );
+
 		SSC_Logger::info( 'restore_manager', 'Transients de lock SSC saneados tras importación de DB.' );
 	}
 
@@ -586,6 +627,255 @@ class SSC_Restore_Manager {
 
 		if ( $count > 0 ) {
 			SSC_Logger::info( 'restore_manager', sprintf( 'Reparación placeholder_escape: %d opción(es) corregidas.', $count ) );
+		}
+	}
+
+	/**
+	 * Elimina drop-ins de caché y limpia directivas auto_prepend_file en .user.ini.
+	 *
+	 * advanced-cache.php, advanced-headers.php y object-cache.php son generados
+	 * automáticamente por plugins de caché (WP Rocket, W3 Total Cache, LiteSpeed, etc.)
+	 * con rutas absolutas del servidor de origen. En el servidor destino esas rutas no
+	 * existen y PHP lanza un Fatal Error antes de que WordPress arranque.
+	 *
+	 * Igualmente, algunos plugins de caché escriben `auto_prepend_file` en .user.ini
+	 * (procesado por PHP-FPM antes de cualquier script). Si el archivo referenciado no
+	 * existe en el servidor destino, PHP muestra "Unknown on line 0" y detiene la carga.
+	 *
+	 * Los plugins regeneran drop-ins y .user.ini en la primera carga del admin.
+	 *
+	 * @return void
+	 */
+	private function purge_cache_dropins(): void {
+		$wp_content = rtrim( WP_CONTENT_DIR, '/\\' );
+		$abspath    = rtrim( ABSPATH, '/\\' );
+
+		// ── Drop-ins PHP ──────────────────────────────────────────────────────────
+		$drop_ins = array(
+			'advanced-cache.php',
+			'advanced-headers.php',
+			'object-cache.php',
+		);
+
+		$deleted = array();
+
+		foreach ( $drop_ins as $filename ) {
+			$path = $wp_content . '/' . $filename;
+			if ( ! file_exists( $path ) ) {
+				continue;
+			}
+			if ( @unlink( $path ) ) { // phpcs:ignore WordPress.PHP.NoSilencedErrors, WordPress.WP.AlternativeFunctions.unlink_unlink
+				$deleted[] = $filename;
+			} else {
+				SSC_Logger::warn( 'restore_manager', 'No se pudo eliminar drop-in de caché: ' . $filename );
+			}
+		}
+
+		if ( ! empty( $deleted ) ) {
+			SSC_Logger::info(
+				'restore_manager',
+				'Drop-ins de caché eliminados (se regenerarán automáticamente): ' . implode( ', ', $deleted )
+			);
+		}
+
+		// ── .user.ini: limpiar auto_prepend_file con rutas inexistentes ───────────
+		// PHP-FPM procesa .user.ini antes de cualquier script; si la ruta apunta al
+		// servidor de origen, produce "Failed opening required ... in Unknown on line 0".
+		$ini_dirs = array_unique( array( $abspath, $wp_content ) );
+
+		foreach ( $ini_dirs as $dir ) {
+			$ini_path = $dir . '/.user.ini';
+			if ( ! file_exists( $ini_path ) ) {
+				continue;
+			}
+
+			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+			$ini_content = file_get_contents( $ini_path );
+			if ( false === $ini_content || false === strpos( $ini_content, 'auto_prepend_file' ) ) {
+				continue;
+			}
+
+			// Strip auto_prepend_file/auto_append_file lines pointing to non-existent paths.
+			$patched = preg_replace_callback(
+				'/^\s*(auto_(?:prepend|append)_file)\s*=\s*(.+)$/m',
+				function ( $m ) {
+					$path = trim( $m[2], "\"' \t" );
+					if ( '' === $path || ! file_exists( $path ) ) {
+						return ''; // remove broken directive
+					}
+					return $m[0]; // keep valid one
+				},
+				$ini_content
+			);
+
+			if ( $patched !== $ini_content ) {
+				// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
+				file_put_contents( $ini_path, $patched );
+				SSC_Logger::info(
+					'restore_manager',
+					'auto_prepend_file eliminado de .user.ini en: ' . $dir
+				);
+			}
+		}
+	}
+
+	/**
+	 * Captura las credenciales de base de datos del sitio destino ANTES de restaurar archivos.
+	 *
+	 * wp-config.php del backup sobreescribirá el local; guardar las credenciales aquí
+	 * permite restaurarlas en el wp-config.php recién extraído.
+	 *
+	 * @return array{host:string,name:string,user:string,password:string,prefix:string,charset:string,collate:string}
+	 */
+	private function capture_db_credentials(): array {
+		global $wpdb;
+		return array(
+			'host'     => defined( 'DB_HOST' )    ? DB_HOST    : '',
+			'name'     => defined( 'DB_NAME' )    ? DB_NAME    : '',
+			'user'     => defined( 'DB_USER' )    ? DB_USER    : '',
+			'password' => defined( 'DB_PASSWORD' ) ? DB_PASSWORD : '',
+			'charset'  => defined( 'DB_CHARSET' ) ? DB_CHARSET  : 'utf8mb4',
+			'collate'  => defined( 'DB_COLLATE' ) ? DB_COLLATE  : '',
+			'prefix'   => $wpdb->prefix,
+		);
+	}
+
+	/**
+	 * Reescribe wp-config.php restaurado para que funcione en el servidor destino.
+	 *
+	 * Aplica en orden:
+	 *  1. Credenciales de BD (DB_HOST/NAME/USER/PASSWORD/CHARSET/COLLATE, $table_prefix).
+	 *  2. Constantes de URL (WP_HOME, WP_SITEURL, WP_CONTENT_URL).
+	 *  3. Flags SSL (FORCE_SSL_ADMIN, FORCE_SSL → false cuando el destino es HTTP).
+	 *
+	 * @param string $current_url URL del sitio destino (sin trailing slash).
+	 * @param array  $current_db  Credenciales capturadas por capture_db_credentials().
+	 * @return void
+	 */
+	private function rewrite_wp_config_constants( string $current_url, array $current_db ): void {
+		$config_path = rtrim( ABSPATH, '/\\' ) . '/wp-config.php';
+
+		if ( ! file_exists( $config_path ) || ! is_readable( $config_path ) ) {
+			SSC_Logger::warn( 'restore_manager', 'wp-config.php no encontrado o no legible; se omite reescritura de constantes.' );
+			return;
+		}
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+		$content = file_get_contents( $config_path );
+		if ( false === $content ) {
+			SSC_Logger::warn( 'restore_manager', 'No se pudo leer wp-config.php para reescribir constantes.' );
+			return;
+		}
+
+		$is_http = ( 'http://' === substr( $current_url, 0, 7 ) );
+		$changes = array();
+
+		// ── 1. Credenciales de BD ─────────────────────────────────────────────────
+		// Restaurar los valores del servidor destino para que WordPress pueda conectarse
+		// a la BD local aunque wp-config.php provenga del servidor de producción.
+		$db_map = array(
+			'DB_HOST'     => $current_db['host'],
+			'DB_NAME'     => $current_db['name'],
+			'DB_USER'     => $current_db['user'],
+			'DB_PASSWORD' => $current_db['password'],
+			'DB_CHARSET'  => $current_db['charset'],
+			'DB_COLLATE'  => $current_db['collate'],
+		);
+
+		foreach ( $db_map as $const => $dest_value ) {
+			if ( '' === $dest_value && in_array( $const, array( 'DB_CHARSET', 'DB_COLLATE' ), true ) ) {
+				continue; // skip empty optional constants
+			}
+			$content = preg_replace_callback(
+				'/(\bdefine\s*\(\s*[\'"]' . preg_quote( $const, '/' ) . '[\'"]\s*,\s*[\'"])([^\'"]*)([\'"])/i',
+				function ( $m ) use ( $const, $dest_value, &$changes ) {
+					if ( $m[2] !== $dest_value ) {
+						// Mask password in log — show only first 2 chars.
+						$log_val = ( 'DB_PASSWORD' === $const && strlen( $dest_value ) > 2 )
+							? substr( $dest_value, 0, 2 ) . str_repeat( '*', strlen( $dest_value ) - 2 )
+							: $dest_value;
+						$changes[] = sprintf( "%s actualizado", $const );
+					}
+					return $m[1] . $dest_value . $m[3];
+				},
+				$content
+			);
+		}
+
+		// $table_prefix is a variable, not a constant — match the assignment.
+		if ( ! empty( $current_db['prefix'] ) ) {
+			$content = preg_replace_callback(
+				'/(\$table_prefix\s*=\s*[\'"])([^\'"]+)([\'"])/i',
+				function ( $m ) use ( $current_db, &$changes ) {
+					if ( $m[2] !== $current_db['prefix'] ) {
+						$changes[] = sprintf( "\$table_prefix: '%s' → '%s'", $m[2], $current_db['prefix'] );
+					}
+					return $m[1] . $current_db['prefix'] . $m[3];
+				},
+				$content
+			);
+		}
+
+		// ── 2. Constantes de URL ──────────────────────────────────────────────────
+		foreach ( array( 'WP_HOME', 'WP_SITEURL', 'WP_CONTENT_URL' ) as $const ) {
+			$content = preg_replace_callback(
+				'/(\bdefine\s*\(\s*[\'"]' . preg_quote( $const, '/' ) . '[\'"]\s*,\s*[\'"])([^\'"]+)([\'"])/i',
+				function ( $m ) use ( $const, $current_url, &$changes ) {
+					$old_url = $m[2];
+
+					if ( 'WP_CONTENT_URL' === $const ) {
+						$parsed  = wp_parse_url( $old_url );
+						$subpath = isset( $parsed['path'] ) ? $parsed['path'] : '/wp-content';
+						$new_url = rtrim( $current_url, '/' ) . $subpath;
+					} else {
+						$new_url = $current_url;
+					}
+
+					if ( $old_url !== $new_url ) {
+						$changes[] = sprintf( "%s: '%s' → '%s'", $const, $old_url, $new_url );
+					}
+
+					return $m[1] . $new_url . $m[3];
+				},
+				$content
+			);
+		}
+
+		// ── 3. Flags SSL ──────────────────────────────────────────────────────────
+		if ( $is_http ) {
+			foreach ( array( 'FORCE_SSL_ADMIN', 'FORCE_SSL' ) as $const ) {
+				$patched = preg_replace_callback(
+					'/(\bdefine\s*\(\s*[\'"]' . preg_quote( $const, '/' ) . '[\'"]\s*,\s*)(true)(\s*\))/i',
+					function ( $m ) use ( $const, &$changes ) {
+						$changes[] = sprintf( '%s: true → false', $const );
+						return $m[1] . 'false' . $m[3];
+					},
+					$content
+				);
+				if ( null !== $patched ) {
+					$content = $patched;
+				}
+			}
+		}
+
+		if ( empty( $changes ) ) {
+			SSC_Logger::info( 'restore_manager', 'wp-config.php: sin constantes que actualizar.' );
+			return;
+		}
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
+		$written = file_put_contents( $config_path, $content );
+
+		if ( false !== $written ) {
+			SSC_Logger::info(
+				'restore_manager',
+				'wp-config.php actualizado: ' . implode( ', ', $changes )
+			);
+		} else {
+			SSC_Logger::warn(
+				'restore_manager',
+				'No se pudo escribir wp-config.php — cambios no aplicados. Intentados: ' . implode( ', ', $changes )
+			);
 		}
 	}
 

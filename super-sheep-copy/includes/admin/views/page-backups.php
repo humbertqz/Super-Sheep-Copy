@@ -101,7 +101,10 @@ if ( $last_mtime > 0 ) {
 					alt="Super Sheep Copy"
 					class="ssc-brand-logo">
 				<div class="ssc-brand-text">
-					<h1 class="ssc-page-title"><?php esc_html_e( 'Super Sheep Copy', 'super-sheep-copy' ); ?></h1>
+					<h1 class="ssc-page-title">
+						<?php esc_html_e( 'Super Sheep Copy', 'super-sheep-copy' ); ?>
+						<span class="ssc-version-badge">v<?php echo esc_html( SSC_VERSION ); ?></span>
+					</h1>
 					<p class="ssc-page-subtitle"><?php esc_html_e( 'Archivos + base de datos · Restauración con reescritura de URLs', 'super-sheep-copy' ); ?></p>
 				</div>
 			</div>
@@ -142,6 +145,9 @@ if ( $last_mtime > 0 ) {
 				<div class="ssc-progress-bar-inner" id="ssc-progress-bar" style="width:0%"></div>
 			</div>
 			<p id="ssc-progress-label" class="ssc-progress-step"><?php esc_html_e( 'Iniciando…', 'super-sheep-copy' ); ?></p>
+			<button id="ssc-cancel-restore-btn" type="button" class="button ssc-cancel-restore-btn" style="display:none;">
+				<?php esc_html_e( 'Cancelar restauración', 'super-sheep-copy' ); ?>
+			</button>
 		</div>
 	</div>
 

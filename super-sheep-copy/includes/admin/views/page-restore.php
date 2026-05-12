@@ -18,7 +18,10 @@ if ( ! defined( 'ABSPATH' ) ) {
 				alt="Super Sheep Copy"
 				class="ssc-brand-logo">
 			<div class="ssc-brand-text">
-				<h1 class="ssc-page-title"><?php esc_html_e( 'Super Sheep Copy', 'super-sheep-copy' ); ?></h1>
+				<h1 class="ssc-page-title">
+					<?php esc_html_e( 'Super Sheep Copy', 'super-sheep-copy' ); ?>
+					<span class="ssc-version-badge">v<?php echo esc_html( SSC_VERSION ); ?></span>
+				</h1>
 				<p class="ssc-page-subtitle"><?php esc_html_e( 'Restaurar · Importa un ZIP para restaurar tu sitio', 'super-sheep-copy' ); ?></p>
 			</div>
 		</div>
@@ -182,5 +185,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 			<div class="ssc-progress-bar-inner" id="ssc-restore-progress-bar" style="width:0%"></div>
 		</div>
 		<p id="ssc-restore-progress-label"><?php esc_html_e( 'Iniciando restauración…', 'super-sheep-copy' ); ?></p>
+		<button id="ssc-restore-cancel-btn" type="button" class="button ssc-cancel-restore-btn" style="display:none;">
+			<?php esc_html_e( 'Cancelar restauración', 'super-sheep-copy' ); ?>
+		</button>
 	</div>
 </div>

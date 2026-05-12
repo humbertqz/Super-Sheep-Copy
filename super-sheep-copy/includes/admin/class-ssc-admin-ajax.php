@@ -34,6 +34,7 @@ class SSC_Admin_Ajax {
 			'ssc_delete_backup',
 			'ssc_restore_backup',
 			'ssc_get_restore_status',
+			'ssc_cancel_restore',
 			'ssc_get_manifest',
 			'ssc_get_running_jobs',
 		);
@@ -85,6 +86,9 @@ class SSC_Admin_Ajax {
 				break;
 			case 'ssc_get_restore_status':
 				$this->handle_get_restore_status();
+				break;
+			case 'ssc_cancel_restore':
+				$this->handle_cancel_restore();
 				break;
 			case 'ssc_get_manifest':
 				$this->handle_get_manifest();
@@ -252,7 +256,7 @@ class SSC_Admin_Ajax {
 
 		ob_start();
 		$manager = new SSC_Restore_Manager();
-		$result  = $manager->start( $filename, false, $job_id );
+		$result  = $manager->start( $filename, true, $job_id );
 		$stray   = ob_get_clean();
 		if ( $stray ) {
 			SSC_Logger::warn( 'restore_backup', 'Salida inesperada durante la restauración: ' . substr( wp_strip_all_tags( $stray ), 0, 300 ) );
@@ -285,6 +289,31 @@ class SSC_Admin_Ajax {
 		}
 
 		wp_send_json_success( $state );
+	}
+
+	/**
+	 * Cancela una restauración o respaldo atascado limpiando locks y modo mantenimiento.
+	 *
+	 * @return void
+	 */
+	private function handle_cancel_restore(): void {
+		$job_id = isset( $_POST['job_id'] ) ? sanitize_key( $_POST['job_id'] ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing
+
+		delete_transient( 'ssc_restore_running' );
+		delete_transient( 'ssc_backup_running' );
+
+		if ( $job_id ) {
+			delete_transient( 'ssc_restore_state_' . $job_id );
+		}
+
+		$maintenance = ABSPATH . '.maintenance';
+		if ( file_exists( $maintenance ) ) {
+			@unlink( $maintenance ); // phpcs:ignore WordPress.PHP.NoSilencedErrors, WordPress.WP.AlternativeFunctions.unlink_unlink
+		}
+
+		SSC_Logger::info( 'cancel_restore', 'Restauración cancelada manualmente por el administrador.' );
+
+		$this->send_json_clean( true, array( 'message' => __( 'Restauración cancelada.', 'super-sheep-copy' ) ) );
 	}
 
 	/**
@@ -528,7 +557,7 @@ class SSC_Admin_Ajax {
 
 		// Iniciar restauración.
 		$manager = new SSC_Restore_Manager();
-		$result  = $manager->start( $stored_name );
+		$result  = $manager->start( $stored_name, true );
 
 		if ( is_wp_error( $result ) ) {
 			SSC_Logger::error( 'upload_restore', $result->get_error_message(), $stored_name );

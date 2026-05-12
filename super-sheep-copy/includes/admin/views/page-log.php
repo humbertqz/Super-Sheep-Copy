@@ -38,7 +38,10 @@ $has_content = ! empty( $summaries ) || ! empty( $ungrouped );
 				alt="Super Sheep Copy"
 				class="ssc-brand-logo">
 			<div class="ssc-brand-text">
-				<h1 class="ssc-page-title"><?php esc_html_e( 'Super Sheep Copy', 'super-sheep-copy' ); ?></h1>
+				<h1 class="ssc-page-title">
+					<?php esc_html_e( 'Super Sheep Copy', 'super-sheep-copy' ); ?>
+					<span class="ssc-version-badge">v<?php echo esc_html( SSC_VERSION ); ?></span>
+				</h1>
 				<p class="ssc-page-subtitle"><?php esc_html_e( 'Log de auditoría · Registro detallado de cada operación', 'super-sheep-copy' ); ?></p>
 			</div>
 		</div>
@@ -84,9 +87,32 @@ $has_content = ! empty( $summaries ) || ! empty( $ungrouped );
 				$status_icon  = $is_error ? '✕' : ( $is_warning ? '!' : '✓' );
 				$started_dt   = date_create( $summary['started_at'] );
 				$started_fmt  = $started_dt ? $started_dt->format( 'd/m/Y H:i:s' ) : $summary['started_at'];
+
+				$log_json = wp_json_encode( array(
+					'job_id'        => $summary['job_id'],
+					'operation'     => $summary['type'],
+					'status'        => $summary['status'],
+					'file'          => $summary['object_name'] ?: null,
+					'started_at'    => $summary['started_at'],
+					'duration'      => ssc_format_duration( $summary['duration_secs'] ),
+					'user'          => $summary['user_login'] ?: null,
+					'entries_count' => $summary['entry_count'],
+					'errors'        => $summary['error_count'],
+					'warnings'      => $summary['warning_count'],
+					'entries'       => array_map( function ( $e ) {
+						$dt = date_create( $e['created_at'] );
+						return array(
+							'time'    => $dt ? $dt->format( 'H:i:s' ) : $e['created_at'],
+							'action'  => $e['action'],
+							'level'   => $e['result'],
+							'message' => $e['message'],
+						);
+					}, $summary['entries'] ),
+				), JSON_UNESCAPED_UNICODE );
 			?>
 			<details class="ssc-op-card ssc-op-card--<?php echo esc_attr( $status ); ?>"
-				<?php echo ( $is_error || $is_warning ) ? 'open' : ''; ?>>
+				<?php echo ( $is_error || $is_warning ) ? 'open' : ''; ?>
+				data-ssc-log="<?php echo esc_attr( $log_json ); ?>">
 
 				<summary class="ssc-op-card__summary">
 					<span class="ssc-op-card__indicator">
@@ -132,6 +158,11 @@ $has_content = ! empty( $summaries ) || ! empty( $ungrouped );
 						<span><?php echo esc_html( $summary['user_login'] ); ?></span>
 						<?php endif; ?>
 					</span>
+
+					<button type="button" class="ssc-copy-log-btn" title="<?php esc_attr_e( 'Copiar log como JSON', 'super-sheep-copy' ); ?>">
+						<span class="ssc-copy-icon"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5" y="5" width="9" height="9" rx="1.5" stroke="currentColor" stroke-width="1.5"/><path d="M5 4V3a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
+						<span class="ssc-copy-label"><?php esc_html_e( 'Copiar JSON', 'super-sheep-copy' ); ?></span>
+					</button>
 				</summary>
 
 				<div class="ssc-op-card__body">
@@ -175,8 +206,23 @@ $has_content = ! empty( $summaries ) || ! empty( $ungrouped );
 			</details>
 			<?php endforeach; ?>
 
-			<?php if ( ! empty( $ungrouped ) ) : ?>
-			<details class="ssc-op-card ssc-op-card--system">
+			<?php if ( ! empty( $ungrouped ) ) :
+				$ungrouped_json = wp_json_encode( array(
+					'operation'     => 'system',
+					'entries_count' => count( $ungrouped ),
+					'entries'       => array_map( function ( $e ) {
+						$dt = date_create( $e['created_at'] );
+						return array(
+							'time'    => $dt ? $dt->format( 'd/m H:i:s' ) : $e['created_at'],
+							'action'  => $e['action'],
+							'level'   => $e['result'],
+							'message' => $e['message'],
+						);
+					}, $ungrouped ),
+				), JSON_UNESCAPED_UNICODE );
+			?>
+			<details class="ssc-op-card ssc-op-card--system"
+				data-ssc-log="<?php echo esc_attr( $ungrouped_json ); ?>">
 				<summary class="ssc-op-card__summary">
 					<span class="ssc-op-card__indicator">
 						<span class="ssc-op-status-dot ssc-op-status-dot--system">·</span>
@@ -193,6 +239,10 @@ $has_content = ! empty( $summaries ) || ! empty( $ungrouped );
 						</span>
 					</span>
 					<span class="ssc-op-card__user"></span>
+					<button type="button" class="ssc-copy-log-btn" title="<?php esc_attr_e( 'Copiar log como JSON', 'super-sheep-copy' ); ?>">
+						<span class="ssc-copy-icon"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5" y="5" width="9" height="9" rx="1.5" stroke="currentColor" stroke-width="1.5"/><path d="M5 4V3a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
+						<span class="ssc-copy-label"><?php esc_html_e( 'Copiar JSON', 'super-sheep-copy' ); ?></span>
+					</button>
 				</summary>
 
 				<div class="ssc-op-card__body">
@@ -240,11 +290,70 @@ $has_content = ! empty( $summaries ) || ! empty( $ungrouped );
 	var feed = document.getElementById( 'ssc-log-feed' );
 	if ( ! feed ) return;
 
+	// Expand / collapse all
 	document.getElementById( 'ssc-expand-all' )?.addEventListener( 'click', function () {
 		feed.querySelectorAll( 'details' ).forEach( function (d) { d.open = true; } );
 	} );
 	document.getElementById( 'ssc-collapse-all' )?.addEventListener( 'click', function () {
 		feed.querySelectorAll( 'details' ).forEach( function (d) { d.open = false; } );
+	} );
+
+	// ── Copy-to-clipboard ─────────────────────────────────────────────────
+
+	var ICON_COPY = '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5" y="5" width="9" height="9" rx="1.5" stroke="currentColor" stroke-width="1.5"/><path d="M5 4V3a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
+	var ICON_CHECK = '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8l4 4 6-7" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+	// Prevent <details> toggle when the click target is the copy button
+	feed.querySelectorAll( '.ssc-op-card__summary' ).forEach( function (summary) {
+		summary.addEventListener( 'click', function (e) {
+			if ( e.target.closest( '.ssc-copy-log-btn' ) ) {
+				e.preventDefault();
+			}
+		} );
+	} );
+
+	function fallbackCopy( text ) {
+		var ta = document.createElement( 'textarea' );
+		ta.value = text;
+		ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0;';
+		document.body.appendChild( ta );
+		ta.select();
+		try { document.execCommand( 'copy' ); } catch (err) {}
+		document.body.removeChild( ta );
+	}
+
+	function showCopied( btn ) {
+		var iconEl  = btn.querySelector( '.ssc-copy-icon' );
+		var labelEl = btn.querySelector( '.ssc-copy-label' );
+		btn.classList.add( 'is-copied' );
+		if ( iconEl )  iconEl.innerHTML  = ICON_CHECK;
+		if ( labelEl ) labelEl.textContent = '✓ Copiado';
+		setTimeout( function () {
+			btn.classList.remove( 'is-copied' );
+			if ( iconEl )  iconEl.innerHTML  = ICON_COPY;
+			if ( labelEl ) labelEl.textContent = 'Copiar JSON';
+		}, 2000 );
+	}
+
+	feed.addEventListener( 'click', function (e) {
+		var btn = e.target.closest( '.ssc-copy-log-btn' );
+		if ( ! btn ) return;
+
+		var card = btn.closest( '[data-ssc-log]' );
+		if ( ! card ) return;
+
+		var raw  = card.getAttribute( 'data-ssc-log' );
+		var obj  = JSON.parse( raw );
+		var text = JSON.stringify( obj, null, 2 );
+
+		if ( navigator.clipboard && navigator.clipboard.writeText ) {
+			navigator.clipboard.writeText( text )
+				.then( function () { showCopied( btn ); } )
+				.catch( function () { fallbackCopy( text ); showCopied( btn ); } );
+		} else {
+			fallbackCopy( text );
+			showCopied( btn );
+		}
 	} );
 }());
 </script>

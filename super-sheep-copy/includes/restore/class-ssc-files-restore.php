@@ -178,15 +178,35 @@ class SSC_Files_Restore {
 				wp_mkdir_p( $dest_dir );
 			}
 
-			// Extraer contenido de la entrada.
-			$content = $zip->getFromIndex( $i );
-			if ( false === $content ) {
+			// Extraer usando stream para evitar cargar el archivo completo en memoria.
+			// getFromIndex() carga toda la entrada en un string PHP — revienta el límite
+			// de memoria con archivos grandes (imágenes, vídeos, dumps grandes).
+			// getStream() copia en bloques de 8 KB sin importar el tamaño del archivo.
+			$stream = $zip->getStream( $entry_name ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+			if ( false === $stream ) {
 				SSC_Logger::warn( 'files_restore', 'No se pudo leer entrada ZIP: ' . $entry_name );
 				continue;
 			}
 
-			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
-			if ( false === file_put_contents( $dest_path, $content ) ) {
+			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen
+			$dest_fp = fopen( $dest_path, 'wb' );
+			if ( false === $dest_fp ) {
+				fclose( $stream ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose
+				return new WP_Error(
+					'extract_write_failed',
+					sprintf(
+						/* translators: %s: destination file path */
+						__( 'No se pudo abrir para escritura: %s', 'super-sheep-copy' ),
+						$dest_path
+					)
+				);
+			}
+
+			$bytes = stream_copy_to_stream( $stream, $dest_fp );
+			fclose( $stream ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose
+			fclose( $dest_fp ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose
+
+			if ( false === $bytes ) {
 				return new WP_Error(
 					'extract_write_failed',
 					sprintf(
