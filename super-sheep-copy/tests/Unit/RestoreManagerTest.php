@@ -258,6 +258,51 @@ class RestoreManagerTest extends TestCase {
 	}
 
 	/** @test */
+	public function safety_snapshot_uses_chunked_backup_lifecycle(): void {
+		$backup = new class() extends \SSC_Backup_Manager {
+			public bool $run_to_completion_called = false;
+			public bool $start_called = false;
+			public array $args = [];
+
+			public function run_to_completion( string $label = '', string $type = 'manual', string $job_id = '' ) {
+				$this->run_to_completion_called = true;
+				$this->args = array( $label, $type, $job_id );
+				return 'snapshot_job';
+			}
+
+			public function start( string $label = '', string $type = 'manual', string $job_id = '' ) {
+				$this->start_called = true;
+				return new \WP_Error( 'unexpected_start', 'start() should not be used for safety snapshots.' );
+			}
+		};
+
+		$manager = new class( $backup ) extends \SSC_Restore_Manager {
+			private \SSC_Backup_Manager $backup;
+
+			public function __construct( \SSC_Backup_Manager $backup ) {
+				$this->backup = $backup;
+			}
+
+			protected function create_backup_manager(): \SSC_Backup_Manager {
+				return $this->backup;
+			}
+
+			public function expose_create_safety_snapshot() {
+				$ref = new \ReflectionMethod( \SSC_Restore_Manager::class, 'create_safety_snapshot' );
+				return $ref->invoke( $this );
+			}
+		};
+
+		$result = $manager->expose_create_safety_snapshot();
+
+		$this->assertSame( 'snapshot_job', $result );
+		$this->assertTrue( $backup->run_to_completion_called );
+		$this->assertFalse( $backup->start_called );
+		$this->assertStringStartsWith( 'pre-restore-', $backup->args[0] );
+		$this->assertSame( 'pre-restore', $backup->args[1] );
+	}
+
+	/** @test */
 	public function it_fails_validation_when_manifest_theme_does_not_match_restored_db(): void {
 		$original_wpdb   = $GLOBALS['wpdb'];
 		$GLOBALS['wpdb'] = $this->make_options_wpdb(

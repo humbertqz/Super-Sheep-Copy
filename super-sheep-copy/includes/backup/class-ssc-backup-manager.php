@@ -206,6 +206,60 @@ class SSC_Backup_Manager {
 		return $this->job_id;
 	}
 
+	/**
+	 * Ejecuta el flujo chunked completo en el proceso actual.
+	 *
+	 * Usado por flujos internos que no tienen un navegador llamando a advance()
+	 * repetidamente, como el snapshot previo a una restauración. Mantiene una sola
+	 * ruta de creación de respaldos: init() + advance().
+	 *
+	 * @param string $label  Etiqueta opcional del respaldo.
+	 * @param string $type   Tipo: 'manual', 'pre-restore', etc.
+	 * @param string $job_id ID de job opcional.
+	 * @return string|WP_Error Job ID en éxito, WP_Error en fallo.
+	 */
+	public function run_to_completion( string $label = '', string $type = 'manual', string $job_id = '' ) {
+		$job_id = $job_id ?: $this->generate_job_id();
+
+		$result = $this->init( $label, $type, $job_id );
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+
+		$max_iterations = 10000;
+		for ( $i = 0; $i < $max_iterations; $i++ ) {
+			$state = $this->advance( $job_id );
+			if ( is_wp_error( $state ) ) {
+				return $state;
+			}
+
+			if ( ! is_array( $state ) ) {
+				return new WP_Error(
+					'backup_invalid_state',
+					__( 'El respaldo devolvió un estado inválido.', 'super-sheep-copy' )
+				);
+			}
+
+			if ( 'completed' === ( $state['status'] ?? '' ) ) {
+				return $job_id;
+			}
+
+			if ( 'failed' === ( $state['status'] ?? '' ) ) {
+				return new WP_Error(
+					'backup_failed',
+					isset( $state['message'] ) ? (string) $state['message'] : __( 'El respaldo falló.', 'super-sheep-copy' )
+				);
+			}
+		}
+
+		$this->job_id = $job_id;
+		$this->fail( __( 'El respaldo excedió el límite interno de iteraciones.', 'super-sheep-copy' ) );
+		return new WP_Error(
+			'backup_iteration_limit',
+			__( 'El respaldo excedió el límite interno de iteraciones.', 'super-sheep-copy' )
+		);
+	}
+
 	// ── API resumable (chunked) ───────────────────────────────────────────────
 
 	/**

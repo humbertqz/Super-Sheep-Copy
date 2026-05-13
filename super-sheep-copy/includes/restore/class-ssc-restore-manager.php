@@ -292,10 +292,22 @@ class SSC_Restore_Manager {
 	private function create_safety_snapshot() {
 		$restore_context = SSC_Logger::get_job_context(); // guardar job_id de la restauración
 		$label           = 'pre-restore-' . gmdate( 'Ymd-His' );
-		$manager         = new SSC_Backup_Manager();
-		$result          = $manager->start( $label, 'pre-restore' );
+		$manager         = $this->create_backup_manager();
+		$result          = $manager->run_to_completion( $label, 'pre-restore' );
 		SSC_Logger::set_job_context( $restore_context ); // restaurar tras el backup interno
 		return $result;
+	}
+
+	/**
+	 * Crea el manager de respaldos usado por el snapshot pre-restore.
+	 *
+	 * Separado para que los tests puedan verificar la coordinación sin ejecutar
+	 * un respaldo real.
+	 *
+	 * @return SSC_Backup_Manager
+	 */
+	protected function create_backup_manager(): SSC_Backup_Manager {
+		return new SSC_Backup_Manager();
 	}
 
 	// ── Importación de DB ─────────────────────────────────────────────────────

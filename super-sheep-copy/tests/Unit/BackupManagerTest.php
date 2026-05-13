@@ -245,6 +245,72 @@ class BackupManagerTest extends TestCase {
     }
 
     /** @test */
+    public function run_to_completion_uses_chunked_lifecycle_until_completed(): void {
+        $manager = new class() extends \SSC_Backup_Manager {
+            public array $calls = [];
+            private int $advance_count = 0;
+
+            public function init( string $label, string $type, string $job_id ) {
+                $this->calls[] = [ 'init', $label, $type, $job_id ];
+                return $job_id;
+            }
+
+            public function advance( string $job_id ) {
+                $this->calls[] = [ 'advance', $job_id ];
+                ++$this->advance_count;
+
+                if ( 1 === $this->advance_count ) {
+                    return array(
+                        'status'  => 'running',
+                        'phase'   => 'files',
+                        'percent' => 50,
+                    );
+                }
+
+                return array(
+                    'status'  => 'completed',
+                    'phase'   => 'completed',
+                    'percent' => 100,
+                );
+            }
+        };
+
+        $result = $manager->run_to_completion( 'pre-restore-test', 'pre-restore', 'job123' );
+
+        $this->assertSame( 'job123', $result );
+        $this->assertSame(
+            array(
+                [ 'init', 'pre-restore-test', 'pre-restore', 'job123' ],
+                [ 'advance', 'job123' ],
+                [ 'advance', 'job123' ],
+            ),
+            $manager->calls
+        );
+    }
+
+    /** @test */
+    public function run_to_completion_returns_error_when_chunked_job_fails(): void {
+        $manager = new class() extends \SSC_Backup_Manager {
+            public function init( string $label, string $type, string $job_id ) {
+                return $job_id;
+            }
+
+            public function advance( string $job_id ) {
+                return array(
+                    'status'  => 'failed',
+                    'message' => 'chunk failed',
+                );
+            }
+        };
+
+        $result = $manager->run_to_completion( 'snapshot', 'pre-restore', 'job_failed' );
+
+        $this->assertInstanceOf( \WP_Error::class, $result );
+        $this->assertSame( 'backup_failed', $result->get_error_code() );
+        $this->assertSame( 'chunk failed', $result->get_error_message() );
+    }
+
+    /** @test */
     public function start_returns_job_id_string_and_creates_backup_artifacts(): void {
         $original_wpdb   = $GLOBALS['wpdb'];
         $GLOBALS['wpdb'] = $this->make_backup_wpdb();
