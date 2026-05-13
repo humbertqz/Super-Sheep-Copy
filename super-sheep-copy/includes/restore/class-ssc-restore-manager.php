@@ -157,7 +157,7 @@ class SSC_Restore_Manager {
 			$this->purge_stale_ssc_locks();
 
 			// 5c. Validar que la importación dejó opciones críticas de WordPress.
-			$result = $this->validate_restored_wordpress_options();
+			$result = $this->validate_restored_wordpress_options( $manifest_data );
 			if ( is_wp_error( $result ) ) {
 				throw new \RuntimeException( $result->get_error_message() );
 			}
@@ -325,8 +325,10 @@ class SSC_Restore_Manager {
 		$zip->close();
 
 		if ( ! $has_db ) {
-			// El ZIP no tiene DB — solo restaurar archivos está bien.
-			SSC_Logger::info( 'restore_manager', 'No se encontró database.sql en el ZIP. Solo se restauran archivos.' );
+			if ( ! empty( $manifest_data['includes']['database'] ) ) {
+				return new WP_Error( 'database_missing', __( 'El respaldo declara base de datos pero no contiene database.sql.', 'super-sheep-copy' ) );
+			}
+			SSC_Logger::info( 'restore_manager', 'No se encontró database.sql en el ZIP; el manifest indica restauración sin DB.' );
 			return true;
 		}
 
@@ -343,6 +345,12 @@ class SSC_Restore_Manager {
 			return new WP_Error( 'db_extract_failed', __( 'No se pudo extraer database.sql del ZIP.', 'super-sheep-copy' ) );
 		}
 
+		$sql_size = (int) filesize( $sql_tmp );
+		if ( $sql_size <= 0 ) {
+			SSC_Filesystem::delete( $tmp_extract_dir, true );
+			return new WP_Error( 'db_empty', __( 'database.sql está vacío; se cancela la restauración de DB.', 'super-sheep-copy' ) );
+		}
+
 		$backup_prefix  = $manifest_data['table_prefix'] ?? $wpdb->prefix;
 		$current_prefix = $wpdb->prefix;
 
@@ -350,6 +358,14 @@ class SSC_Restore_Manager {
 		$result     = $db_restore->run();
 
 		SSC_Filesystem::delete( $tmp_extract_dir, true );
+
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+
+		if ( $db_restore->get_statement_count() <= 0 ) {
+			return new WP_Error( 'db_no_statements', __( 'database.sql no ejecutó ninguna sentencia; se cancela la restauración.', 'super-sheep-copy' ) );
+		}
 
 		return $result;
 	}
@@ -564,7 +580,7 @@ class SSC_Restore_Manager {
 	 *
 	 * @return true|WP_Error
 	 */
-	private function validate_restored_wordpress_options() {
+	private function validate_restored_wordpress_options( array $manifest_data = array() ) {
 		global $wpdb;
 
 		$required = array(
@@ -613,12 +629,68 @@ class SSC_Restore_Manager {
 			);
 		}
 
+		if ( isset( $manifest_data['db_snapshot'] ) && is_array( $manifest_data['db_snapshot'] ) ) {
+			$snapshot = $manifest_data['db_snapshot'];
+
+			foreach ( array( 'template', 'stylesheet' ) as $key ) {
+				if ( isset( $snapshot[ $key ] ) && '' !== (string) $snapshot[ $key ] && (string) $snapshot[ $key ] !== (string) $found[ $key ] ) {
+					return new WP_Error(
+						'restored_theme_mismatch',
+						sprintf(
+							/* translators: 1: option name, 2: expected value, 3: actual value */
+							__( 'La opción de tema restaurada no coincide (%1$s esperado: %2$s, actual: %3$s).', 'super-sheep-copy' ),
+							$key,
+							(string) $snapshot[ $key ],
+							(string) $found[ $key ]
+						)
+					);
+				}
+			}
+
+			if ( isset( $snapshot['active_plugins'] ) && is_array( $snapshot['active_plugins'] ) ) {
+				$expected_plugins = array_values( $snapshot['active_plugins'] );
+				$actual_plugins   = maybe_unserialize( $found['active_plugins'] );
+				$actual_plugins   = is_array( $actual_plugins ) ? array_values( $actual_plugins ) : array();
+
+				sort( $expected_plugins );
+				sort( $actual_plugins );
+
+				if ( $expected_plugins !== $actual_plugins ) {
+					return new WP_Error(
+						'restored_plugins_mismatch',
+						sprintf(
+							/* translators: 1: expected plugin count, 2: actual plugin count */
+							__( 'La lista de plugins activos restaurada no coincide (esperados: %1$d, actuales: %2$d).', 'super-sheep-copy' ),
+							count( $expected_plugins ),
+							count( $actual_plugins )
+						)
+					);
+				}
+			}
+
+			if ( isset( $snapshot['user_count'] ) && (int) $snapshot['user_count'] > 0 ) {
+				$user_count = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->users}" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+				if ( (int) $snapshot['user_count'] !== $user_count ) {
+					return new WP_Error(
+						'restored_users_mismatch',
+						sprintf(
+							/* translators: 1: expected user count, 2: actual user count */
+							__( 'La tabla de usuarios restaurada no coincide (esperados: %1$d, actuales: %2$d).', 'super-sheep-copy' ),
+							(int) $snapshot['user_count'],
+							$user_count
+						)
+					);
+				}
+			}
+		}
+
 		SSC_Logger::info(
 			'restore_manager',
 			sprintf(
-				'DB restaurada validada. Tema: template=%s, stylesheet=%s.',
+				'DB restaurada validada. Tema: template=%s, stylesheet=%s. Plugins activos: %d.',
 				(string) $found['template'],
-				(string) $found['stylesheet']
+				(string) $found['stylesheet'],
+				count( (array) maybe_unserialize( $found['active_plugins'] ) )
 			)
 		);
 

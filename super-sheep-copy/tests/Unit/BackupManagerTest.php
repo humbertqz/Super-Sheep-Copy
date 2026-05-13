@@ -224,6 +224,7 @@ class BackupManagerTest extends TestCase {
     private function make_backup_wpdb(): object {
         return new class() {
             public string  $prefix     = 'wp_';
+            public string  $users      = 'wp_users';
             public ?object $dbh        = null;
             public string  $last_error = '';
             private int    $create_idx = -1;

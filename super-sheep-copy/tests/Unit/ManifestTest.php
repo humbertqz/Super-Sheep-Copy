@@ -28,8 +28,20 @@ class ManifestTest extends TestCase {
         $this->assertArrayHasKey( 'plugin_version', $data );
         $this->assertArrayHasKey( 'site_url', $data );
         $this->assertArrayHasKey( 'table_prefix', $data );
+        $this->assertArrayHasKey( 'db_snapshot', $data );
         $this->assertArrayHasKey( 'created_at', $data );
         $this->assertSame( SSC_VERSION, $data['plugin_version'] );
+    }
+
+    /** @test */
+    public function it_includes_database_snapshot_fields(): void {
+        $m    = new \SSC_Manifest();
+        $data = $m->to_array();
+
+        $this->assertArrayHasKey( 'template', $data['db_snapshot'] );
+        $this->assertArrayHasKey( 'stylesheet', $data['db_snapshot'] );
+        $this->assertArrayHasKey( 'active_plugins', $data['db_snapshot'] );
+        $this->assertArrayHasKey( 'user_count', $data['db_snapshot'] );
     }
 
     /** @test */

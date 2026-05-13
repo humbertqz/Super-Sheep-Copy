@@ -222,6 +222,7 @@ class RestoreManagerTest extends TestCase {
 		return new class( $options ) {
 			public string $prefix = 'wp_';
 			public string $options = 'wp_options';
+			public string $users = 'wp_users';
 			public ?object $dbh = null;
 			public string $last_error = '';
 			private array $values;
@@ -235,6 +236,9 @@ class RestoreManagerTest extends TestCase {
 			}
 
 			public function get_var( string $query ) {
+				if ( false !== strpos( $query, 'COUNT(*) FROM wp_users' ) ) {
+					return $this->values['__user_count'] ?? 0;
+				}
 				foreach ( $this->values as $name => $value ) {
 					if ( false !== strpos( $query, '/* ' . $name . ' */' ) ) {
 						return $value;
@@ -251,5 +255,75 @@ class RestoreManagerTest extends TestCase {
 				return true;
 			}
 		};
+	}
+
+	/** @test */
+	public function it_fails_validation_when_manifest_theme_does_not_match_restored_db(): void {
+		$original_wpdb   = $GLOBALS['wpdb'];
+		$GLOBALS['wpdb'] = $this->make_options_wpdb(
+			array(
+				'siteurl'        => 'http://localhost:8888/wp-test',
+				'home'           => 'http://localhost:8888/wp-test',
+				'template'       => 'local-theme',
+				'stylesheet'     => 'local-theme',
+				'active_plugins' => serialize( array( 'plugin/plugin.php' ) ),
+				'__user_count'   => 2,
+			)
+		);
+
+		try {
+			$manager = new \SSC_Restore_Manager();
+			$ref     = new \ReflectionMethod( $manager, 'validate_restored_wordpress_options' );
+			$result  = $ref->invoke(
+				$manager,
+				array(
+					'db_snapshot' => array(
+						'template'       => 'backup-theme',
+						'stylesheet'     => 'backup-theme',
+						'active_plugins' => array( 'plugin/plugin.php' ),
+						'user_count'     => 2,
+					),
+				)
+			);
+			$this->assertInstanceOf( \WP_Error::class, $result );
+			$this->assertSame( 'restored_theme_mismatch', $result->get_error_code() );
+		} finally {
+			$GLOBALS['wpdb'] = $original_wpdb;
+		}
+	}
+
+	/** @test */
+	public function it_fails_validation_when_manifest_user_count_does_not_match_restored_db(): void {
+		$original_wpdb   = $GLOBALS['wpdb'];
+		$GLOBALS['wpdb'] = $this->make_options_wpdb(
+			array(
+				'siteurl'        => 'http://localhost:8888/wp-test',
+				'home'           => 'http://localhost:8888/wp-test',
+				'template'       => 'backup-theme',
+				'stylesheet'     => 'backup-theme',
+				'active_plugins' => serialize( array( 'plugin/plugin.php' ) ),
+				'__user_count'   => 1,
+			)
+		);
+
+		try {
+			$manager = new \SSC_Restore_Manager();
+			$ref     = new \ReflectionMethod( $manager, 'validate_restored_wordpress_options' );
+			$result  = $ref->invoke(
+				$manager,
+				array(
+					'db_snapshot' => array(
+						'template'       => 'backup-theme',
+						'stylesheet'     => 'backup-theme',
+						'active_plugins' => array( 'plugin/plugin.php' ),
+						'user_count'     => 2,
+					),
+				)
+			);
+			$this->assertInstanceOf( \WP_Error::class, $result );
+			$this->assertSame( 'restored_users_mismatch', $result->get_error_code() );
+		} finally {
+			$GLOBALS['wpdb'] = $original_wpdb;
+		}
 	}
 }

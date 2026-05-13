@@ -51,7 +51,32 @@ class SSC_Manifest {
 			),
 			'file_count'      => 0,
 			'db_size_bytes'   => 0,
+			'db_snapshot'     => $this->build_db_snapshot(),
 			'checksum_sha256' => '',
+		);
+	}
+
+	/**
+	 * Captura una huella mínima de estado DB que debe coincidir tras restaurar.
+	 *
+	 * @return array
+	 */
+	private function build_db_snapshot(): array {
+		global $wpdb;
+
+		$active_plugins = get_option( 'active_plugins', array() );
+		if ( ! is_array( $active_plugins ) ) {
+			$active_plugins = array();
+		}
+
+		$user_count = $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->users}" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+
+		return array(
+			'template'       => (string) get_option( 'template', '' ),
+			'stylesheet'     => (string) get_option( 'stylesheet', '' ),
+			'active_plugins' => array_values( $active_plugins ),
+			'plugin_count'   => count( $active_plugins ),
+			'user_count'     => (int) $user_count,
 		);
 	}
 

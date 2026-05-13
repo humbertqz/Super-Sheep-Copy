@@ -25,6 +25,7 @@ if ( ! isset( $GLOBALS['wpdb'] ) ) {
         public string $posts      = 'wp_posts';
         public string $postmeta   = 'wp_postmeta';
         public string $usermeta   = 'wp_usermeta';
+        public string $users      = 'wp_users';
         public string $termmeta   = 'wp_termmeta';
         public string $comments   = 'wp_comments';
         public string $commentmeta = 'wp_commentmeta';
