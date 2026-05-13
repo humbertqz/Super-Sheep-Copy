@@ -25,17 +25,117 @@ class SSC_Admin {
 	private array $page_hooks = [];
 
 	/**
+	 * Re-entrancy guard for fix_ssc_url_scheme to prevent infinite recursion.
+	 *
+	 * @var bool
+	 */
+	private static bool $fixing_url = false;
+
+	/**
 	 * Registra los hooks de WordPress necesarios.
 	 *
 	 * @return void
 	 */
 	public function register_hooks(): void {
+		// Use the siteurl option as the authoritative source for the site's
+		// intended scheme. Proxy headers ($_SERVER['HTTPS'], HTTP_X_FORWARDED_PROTO)
+		// are unreliable on local stacks like Local by Flywheel which always set
+		// them to 'https' even for plain-HTTP connections. If the site was
+		// configured as http://, disable FORCE_SSL_ADMIN so WordPress stops
+		// generating https:// admin URLs and redirecting to HTTPS.
+		$site_scheme = wp_parse_url( get_option( 'siteurl' ), PHP_URL_SCHEME ) ?: 'http';
+		if ( 'http' === $site_scheme ) {
+			force_ssl_admin( false );
+		}
+
 		add_action( 'admin_menu',            array( $this, 'register_menus' ) );
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
 		add_action( 'admin_init',            array( $this, 'register_settings' ) );
 		add_action( 'admin_init',            array( $this, 'process_bulk_actions' ) );
 		add_action( 'admin_init',            array( 'SSC_Self_Updater', 'maybe_apply_pending_swap' ), 5 );
 		add_action( 'admin_notices',         array( $this, 'show_self_update_notices' ) );
+
+		// Safety-net filter: if any admin_url() call still produces https:// on an
+		// HTTP connection (e.g. because another plugin re-enables force_ssl_admin),
+		// re-generate it with the 'http' scheme so the path is also correct.
+		add_filter( 'admin_url',    array( $this, 'fix_ssc_url_scheme' ),        10, 2 );
+		// Catch any https:// redirect that slips through (e.g. from force_ssl_admin
+		// in admin.php or auth_redirect) and convert it back to http:// with the
+		// correct base path (important on Local by Flywheel where HTTP and HTTPS
+		// use different path prefixes).
+		add_filter( 'wp_redirect', array( $this, 'fix_admin_redirect_scheme' ), 1 );
+	}
+
+	/**
+	 * When siteurl is configured as http://, prevents admin_url() from generating
+	 * https:// links for SSC pages (e.g. when FORCE_SSL_ADMIN is true on a local
+	 * dev server). Uses siteurl rather than $_SERVER headers because local stacks
+	 * like Local by Flywheel set HTTP_X_FORWARDED_PROTO to 'https' even for plain
+	 * HTTP connections, making server-side detection unreliable.
+	 *
+	 * Safe on production HTTPS sites: siteurl will be https://, so the condition
+	 * is never true there and URLs are returned unchanged.
+	 *
+	 * @param string $url  Generated admin URL.
+	 * @param string $path Path passed to admin_url().
+	 * @return string
+	 */
+	public function fix_ssc_url_scheme( string $url, string $path ): string {
+		if ( self::$fixing_url ) {
+			return $url;
+		}
+		if ( false === strpos( $path, 'page=super-sheep-copy' ) &&
+			false === strpos( $path, 'page=ssc-' ) &&
+			false === strpos( $path, 'admin-ajax.php' ) &&
+			false === strpos( $path, 'admin-post.php' ) ) {
+			return $url;
+		}
+		$site_scheme = wp_parse_url( get_option( 'siteurl' ), PHP_URL_SCHEME ) ?: 'http';
+		if ( 'http' === $site_scheme && 0 === strpos( $url, 'https://' ) ) {
+			// Re-generate with 'http' scheme so the base path is also correct
+			// (on some local stacks HTTPS and HTTP use different base paths).
+			self::$fixing_url = true;
+			$fixed = admin_url( $path, 'http' );
+			self::$fixing_url = false;
+			return $fixed;
+		}
+		return $url;
+	}
+
+	/**
+	 * Intercepts any wp_redirect() call that tries to send the browser to an
+	 * https:// wp-admin URL when the site's own siteurl is http://.
+	 *
+	 * This is the last line of defence: it fires even when the redirect
+	 * originates from WordPress core (e.g. the force_ssl_admin check in
+	 * admin.php) rather than from our own admin_url() calls.
+	 *
+	 * Uses admin_url($rel, 'http') to rebuild the target so the base path is
+	 * also correct on stacks (like Local by Flywheel) where HTTPS and HTTP
+	 * are served from different path prefixes.
+	 *
+	 * Safe on production: when siteurl is https:// the condition is never true.
+	 *
+	 * @param string $location Redirect URL as determined by WordPress.
+	 * @return string
+	 */
+	public function fix_admin_redirect_scheme( string $location ): string {
+		$site_scheme = wp_parse_url( get_option( 'siteurl' ), PHP_URL_SCHEME ) ?: 'http';
+		if ( 'http' !== $site_scheme || 0 !== strpos( $location, 'https://' ) ) {
+			return $location;
+		}
+		$parsed = wp_parse_url( $location );
+		$path   = $parsed['path'] ?? '';
+		// Only handle redirects to the wp-admin area.
+		$pos = strpos( $path, '/wp-admin/' );
+		if ( false === $pos ) {
+			return $location;
+		}
+		$admin_rel = substr( $path, $pos + strlen( '/wp-admin/' ) );
+		$query     = isset( $parsed['query'] ) ? '?' . $parsed['query'] : '';
+		// admin_url($rel, 'http') re-generates the full URL with the correct
+		// HTTP base path (including any subdirectory prefix).
+		return admin_url( $admin_rel . $query, 'http' );
 	}
 
 	/**
@@ -278,11 +378,10 @@ class SSC_Admin {
 
 		$redirect = add_query_arg(
 			array(
-				'page'             => 'super-sheep-copy',
 				'ssc_bulk_deleted' => $deleted,
 				'ssc_bulk_errors'  => $errors,
 			),
-			admin_url( 'admin.php' )
+			admin_url( 'admin.php?page=super-sheep-copy' )
 		);
 
 		wp_safe_redirect( $redirect );
