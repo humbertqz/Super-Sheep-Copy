@@ -337,7 +337,7 @@ if ( $last_mtime > 0 ) {
 			<p><?php esc_html_e( 'El sitio ha sido restaurado correctamente. Por seguridad, tu sesión ha sido cerrada.', 'super-sheep-copy' ); ?></p>
 			<p><?php esc_html_e( 'Necesitarás autenticarte de nuevo para continuar trabajando en el administrador.', 'super-sheep-copy' ); ?></p>
 			<div class="ssc-restore-done-actions">
-				<a id="ssc-restore-done-login" href="<?php echo esc_url( wp_login_url() ); ?>" class="ssc-btn-success">
+				<a id="ssc-restore-done-login" href="<?php echo esc_url( SSC_Admin::get_login_url() ); ?>" class="ssc-btn-success">
 					<?php esc_html_e( 'Ir al inicio de sesión', 'super-sheep-copy' ); ?>
 				</a>
 			</div>

@@ -295,7 +295,7 @@ class SSC_Admin {
 			'sscData',
 			array(
 				'ajaxUrl'            => admin_url( 'admin-ajax.php' ),
-				'loginUrl'           => wp_login_url(),
+				'loginUrl'           => self::get_login_url(),
 				'nonce'              => wp_create_nonce( 'ssc_ajax_nonce' ),
 				// job_id en curso (cadena vacía si no hay ninguno).
 				'runningBackupJobId' => $running_backup_job  ? (string) $running_backup_job  : '',
@@ -329,6 +329,25 @@ class SSC_Admin {
 				),
 			)
 		);
+	}
+
+	/**
+	 * Devuelve la URL de login usando siteurl como fuente de verdad.
+	 *
+	 * wp_login_url() puede heredar FORCE_SSL_ADMIN o proxy headers incorrectos
+	 * después de una restauración local, generando https:// o perdiendo el
+	 * subdirectorio de WordPress. Para el modal post-restore necesitamos una URL
+	 * simple y estable al wp-login.php del sitio actual.
+	 *
+	 * @return string
+	 */
+	public static function get_login_url(): string {
+		$site_url = (string) get_option( 'siteurl' );
+		if ( '' === $site_url ) {
+			$site_url = site_url();
+		}
+
+		return rtrim( $site_url, '/' ) . '/wp-login.php';
 	}
 
 	// ── Bulk actions ──────────────────────────────────────────────────────────

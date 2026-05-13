@@ -185,6 +185,34 @@ class FilesBackupTest extends TestCase {
 		}
 	}
 
+	/** @test */
+	public function test_run_does_not_follow_symlinks_outside_abspath(): void {
+		if ( ! function_exists( 'symlink' ) ) {
+			$this->markTestSkipped( 'symlink() is not available.' );
+		}
+
+		$secret_file = $this->work_dir . '/outside-secret.txt';
+		$link_path   = ABSPATH . 'ssc_outside_secret_link_' . uniqid() . '.txt';
+		file_put_contents( $secret_file, 'must not be backed up' );
+
+		if ( ! @symlink( $secret_file, $link_path ) ) { // phpcs:ignore WordPress.PHP.NoSilencedErrors
+			$this->markTestSkipped( 'Could not create symlink on this filesystem.' );
+		}
+
+		[ $writer, $zip_path ] = $this->make_open_writer();
+		$backup = new \SSC_Files_Backup( $writer );
+		$backup->run();
+		$writer->close();
+
+		@unlink( $link_path ); // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
+
+		$entries = $this->get_zip_entries( $zip_path );
+		$this->assertFalse(
+			$this->entries_contain_basename( $entries, 'outside-secret.txt' ),
+			'Symlink targets outside ABSPATH must not be added to backups.'
+		);
+	}
+
 	// ── run() — exclusiones estáticas ─────────────────────────────────────────
 
 	/** @test */

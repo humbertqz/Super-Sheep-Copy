@@ -86,7 +86,7 @@ class SSC_Files_Backup {
 		try {
 			$dir_iterator = new RecursiveDirectoryIterator(
 				$abspath,
-				RecursiveDirectoryIterator::SKIP_DOTS | RecursiveDirectoryIterator::FOLLOW_SYMLINKS
+				RecursiveDirectoryIterator::SKIP_DOTS
 			);
 			$iterator = new RecursiveIteratorIterator(
 				$dir_iterator,
@@ -98,12 +98,17 @@ class SSC_Files_Backup {
 
 		foreach ( $iterator as $file ) {
 			/** @var SplFileInfo $file */
-			if ( ! $file->isFile() ) {
+			if ( $file->isLink() || ! $file->isFile() ) {
 				continue;
 			}
 
 			$real_path = $file->getRealPath();
 			if ( false === $real_path ) {
+				continue;
+			}
+
+			$local_name = $this->local_name_for_path( $real_path, $abspath );
+			if ( false === $local_name ) {
 				continue;
 			}
 
@@ -171,8 +176,11 @@ class SSC_Files_Backup {
 
 		while ( $i < $total && $added < $max_files ) {
 			$real_path  = $paths[ $i ];
-			$local_name = ltrim( str_replace( $abspath, '', $real_path ), '/\\' );
-			$local_name = str_replace( '\\', '/', $local_name );
+			$local_name = $this->local_name_for_path( (string) $real_path, $abspath );
+			if ( false === $local_name ) {
+				++$i;
+				continue;
+			}
 
 			$result = $this->zip->add_file( $real_path, $local_name );
 			if ( is_wp_error( $result ) ) {
@@ -213,7 +221,7 @@ class SSC_Files_Backup {
 		try {
 			$dir_iterator = new RecursiveDirectoryIterator(
 				$abspath,
-				RecursiveDirectoryIterator::SKIP_DOTS | RecursiveDirectoryIterator::FOLLOW_SYMLINKS
+				RecursiveDirectoryIterator::SKIP_DOTS
 			);
 			$iterator = new RecursiveIteratorIterator(
 				$dir_iterator,
@@ -225,7 +233,7 @@ class SSC_Files_Backup {
 
 		foreach ( $iterator as $file ) {
 			/** @var SplFileInfo $file */
-			if ( ! $file->isFile() ) {
+			if ( $file->isLink() || ! $file->isFile() ) {
 				continue;
 			}
 
@@ -234,14 +242,15 @@ class SSC_Files_Backup {
 				continue;
 			}
 
+			$local_name = $this->local_name_for_path( $real_path, $abspath );
+			if ( false === $local_name ) {
+				continue;
+			}
+
 			// Aplicar exclusiones.
 			if ( $this->is_excluded( $real_path ) ) {
 				continue;
 			}
-
-			// Ruta relativa dentro del ZIP (siempre con slash forward).
-			$local_name = ltrim( str_replace( $abspath, '', $real_path ), '/\\' );
-			$local_name = str_replace( '\\', '/', $local_name );
 
 			$result = $this->zip->add_file( $real_path, $local_name );
 			if ( is_wp_error( $result ) ) {
@@ -382,5 +391,26 @@ class SSC_Files_Backup {
 		}
 
 		return false;
+	}
+
+	/**
+	 * Devuelve la ruta relativa segura dentro del ZIP para un archivo bajo ABSPATH.
+	 *
+	 * @param string $real_path Ruta real del archivo.
+	 * @param string $abspath   Raíz WordPress normalizada.
+	 * @return string|false Ruta relativa o false si el archivo queda fuera de ABSPATH.
+	 */
+	private function local_name_for_path( string $real_path, string $abspath ) {
+		$root = realpath( $abspath ) ?: $abspath;
+		$root = rtrim( str_replace( '\\', '/', $root ), '/' ) . '/';
+		$path = str_replace( '\\', '/', $real_path );
+
+		if ( strpos( $path, $root ) !== 0 ) {
+			SSC_Logger::warn( 'files_backup', 'Archivo fuera de ABSPATH omitido: ' . $real_path );
+			return false;
+		}
+
+		$local_name = ltrim( substr( $path, strlen( $root ) ), '/' );
+		return '' === $local_name ? false : $local_name;
 	}
 }

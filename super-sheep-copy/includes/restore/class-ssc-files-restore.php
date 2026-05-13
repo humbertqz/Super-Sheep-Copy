@@ -153,6 +153,11 @@ class SSC_Files_Restore {
 
 			// Directorios: solo crear, no extraer contenido.
 			if ( substr( $entry_name, -1 ) === '/' ) {
+				$validation = SSC_Security::validate_zip_entry( $entry_name, $this->tmp_dir );
+				if ( is_wp_error( $validation ) ) {
+					SSC_Logger::warn( 'files_restore', 'Directorio ZIP inseguro omitido: ' . $entry_name );
+					continue;
+				}
 				wp_mkdir_p( $this->tmp_dir . '/' . $entry_name );
 				continue;
 			}

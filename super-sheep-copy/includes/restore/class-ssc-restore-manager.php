@@ -156,6 +156,12 @@ class SSC_Restore_Manager {
 			//     de un respaldo/restauración que nunca existió en este sitio.
 			$this->purge_stale_ssc_locks();
 
+			// 5c. Validar que la importación dejó opciones críticas de WordPress.
+			$result = $this->validate_restored_wordpress_options();
+			if ( is_wp_error( $result ) ) {
+				throw new \RuntimeException( $result->get_error_message() );
+			}
+
 			// 6. Reescritura de URLs si el dominio o el esquema cambió.
 			$backup_url = rtrim( $manifest_data['site_url'] ?? '', '/' );
 
@@ -179,6 +185,10 @@ class SSC_Restore_Manager {
 			//     Algunos backups traen '{sha256hash}' en lugar de '%' en valores como
 			//     permalink_structure o datos serializados de plugins (Yoast SEO, etc.).
 			$this->repair_placeholder_escape_corruption();
+
+			// 6c. En restauraciones hacia HTTP, desactivar restos de plugins/reglas SSL
+			//     que pueden forzar redirecciones a HTTPS del sitio de origen.
+			$this->cleanup_http_destination_ssl_forcing( $current_url );
 
 		} catch ( \Throwable $e ) {
 			// Captura tanto \Exception como \Error (p.ej. TypeError, Error de propiedad).
@@ -432,6 +442,11 @@ class SSC_Restore_Manager {
 			$new_content = $wp_block . ( $existing !== '' ? "\n" . $existing : '' );
 		}
 
+		$site_scheme = wp_parse_url( $site_url, PHP_URL_SCHEME );
+		if ( 'http' === $site_scheme ) {
+			$new_content = $this->strip_https_redirect_rules_from_htaccess( $new_content );
+		}
+
 		// Strip php_value auto_prepend_file / auto_append_file directives pointing to
 		// non-existent paths (written by caching plugins with production server paths).
 		// On Apache/mod_php these take effect at request start — "Unknown on line 0".
@@ -542,6 +557,291 @@ class SSC_Restore_Manager {
 		$this->update_state( 'running', __( 'Importando base de datos…', 'super-sheep-copy' ), 60 );
 
 		SSC_Logger::info( 'restore_manager', 'Transients de lock SSC saneados tras importación de DB.' );
+	}
+
+	/**
+	 * Verifica que la DB restaurada contiene opciones base de WordPress.
+	 *
+	 * @return true|WP_Error
+	 */
+	private function validate_restored_wordpress_options() {
+		global $wpdb;
+
+		$required = array(
+			'siteurl',
+			'home',
+			'template',
+			'stylesheet',
+			'active_plugins',
+		);
+
+		$found = array();
+		foreach ( $required as $option_name ) {
+			$value = $wpdb->get_var( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+				$wpdb->prepare(
+					"SELECT option_value FROM {$wpdb->options} WHERE option_name = %s LIMIT 1",
+					$option_name
+				)
+			);
+			if ( null !== $value ) {
+				$found[ $option_name ] = $value;
+			}
+		}
+
+		$missing = array();
+		foreach ( $required as $option_name ) {
+			if ( ! array_key_exists( $option_name, $found ) ) {
+				$missing[] = $option_name;
+			}
+		}
+
+		if ( ! empty( $missing ) ) {
+			return new WP_Error(
+				'restored_options_missing',
+				sprintf(
+					/* translators: %s: comma-separated missing option names */
+					__( 'La base de datos restaurada no contiene opciones críticas de WordPress: %s', 'super-sheep-copy' ),
+					implode( ', ', $missing )
+				)
+			);
+		}
+
+		if ( '' === (string) $found['template'] || '' === (string) $found['stylesheet'] ) {
+			return new WP_Error(
+				'restored_theme_missing',
+				__( 'La base de datos restaurada no define el tema activo.', 'super-sheep-copy' )
+			);
+		}
+
+		SSC_Logger::info(
+			'restore_manager',
+			sprintf(
+				'DB restaurada validada. Tema: template=%s, stylesheet=%s.',
+				(string) $found['template'],
+				(string) $found['stylesheet']
+			)
+		);
+
+		return true;
+	}
+
+	/**
+	 * Limpia opciones y plugins conocidos que fuerzan HTTPS al restaurar hacia HTTP.
+	 *
+	 * @param string $current_url URL del sitio destino.
+	 * @return void
+	 */
+	private function cleanup_http_destination_ssl_forcing( string $current_url ): void {
+		if ( 'http://' !== substr( $current_url, 0, 7 ) ) {
+			return;
+		}
+
+		$this->disable_known_ssl_redirect_plugins();
+		$this->disable_known_ssl_redirect_options();
+		SSC_Logger::info( 'restore_manager', 'Limpieza de redirecciones SSL aplicada para destino HTTP.' );
+	}
+
+	/**
+	 * Desactiva plugins cuyo propósito principal es forzar SSL/HTTPS.
+	 *
+	 * @return void
+	 */
+	private function disable_known_ssl_redirect_plugins(): void {
+		global $wpdb;
+
+		$known_ssl_plugins = array(
+			'easy-https-redirection/https-redirection.php',
+			'http-https-remover/http-https-remover.php',
+			'really-simple-ssl/rlrsssl-really-simple-ssl.php',
+			'really-simple-ssl/really-simple-ssl.php',
+			'really-simple-security/really-simple-security.php',
+			'ssl-insecure-content-fixer/ssl-insecure-content-fixer.php',
+			'wordpress-https/wordpress-https.php',
+			'wp-force-ssl/wp-force-ssl.php',
+		);
+
+		$active = $wpdb->get_var( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			$wpdb->prepare(
+				"SELECT option_value FROM {$wpdb->options} WHERE option_name = %s LIMIT 1",
+				'active_plugins'
+			)
+		);
+
+		if ( is_string( $active ) && '' !== $active ) {
+			$plugins = maybe_unserialize( $active );
+			if ( is_array( $plugins ) ) {
+				$filtered = array_values( array_diff( $plugins, $known_ssl_plugins ) );
+				if ( $filtered !== $plugins ) {
+					$this->raw_update_option( 'active_plugins', serialize( $filtered ) );
+					SSC_Logger::info( 'restore_manager', 'Plugins SSL desactivados para destino HTTP: ' . implode( ', ', array_values( array_diff( $plugins, $filtered ) ) ) );
+				}
+			}
+		}
+
+		$sitewide = $wpdb->get_var( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			$wpdb->prepare(
+				"SELECT option_value FROM {$wpdb->options} WHERE option_name = %s LIMIT 1",
+				'active_sitewide_plugins'
+			)
+		);
+
+		if ( is_string( $sitewide ) && '' !== $sitewide ) {
+			$plugins = maybe_unserialize( $sitewide );
+			if ( is_array( $plugins ) ) {
+				$filtered = $plugins;
+				foreach ( $known_ssl_plugins as $plugin_file ) {
+					unset( $filtered[ $plugin_file ] );
+				}
+				if ( $filtered !== $plugins ) {
+					$this->raw_update_option( 'active_sitewide_plugins', serialize( $filtered ) );
+				}
+			}
+		}
+	}
+
+	/**
+	 * Desactiva flags comunes de plugins SSL cuando el destino es HTTP.
+	 *
+	 * @return void
+	 */
+	private function disable_known_ssl_redirect_options(): void {
+		$false_options = array(
+			'rlrsssl_force_ssl',
+			'rlrsssl_htaccess_warning_shown',
+			'rsssl_ssl_enabled',
+			'rsssl_redirect',
+			'wp_force_ssl_enable_ssl',
+			'wp_force_ssl_fix_content',
+			'wp_force_ssl_hsts',
+		);
+
+		foreach ( $false_options as $option_name ) {
+			$this->raw_update_option( $option_name, '0' );
+		}
+
+		$this->patch_serialized_option_booleans(
+			'rlrsssl_options',
+			array(
+				'htaccess_redirect',
+				'javascript_redirect',
+				'mixed_content_fixer',
+				'redirect',
+				'ssl_enabled',
+			)
+		);
+	}
+
+	/**
+	 * Pone en false claves booleanas dentro de una opción serializada.
+	 *
+	 * @param string $option_name Nombre de opción.
+	 * @param array  $keys        Claves a desactivar.
+	 * @return void
+	 */
+	private function patch_serialized_option_booleans( string $option_name, array $keys ): void {
+		global $wpdb;
+
+		$raw = $wpdb->get_var( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			$wpdb->prepare(
+				"SELECT option_value FROM {$wpdb->options} WHERE option_name = %s LIMIT 1",
+				$option_name
+			)
+		);
+
+		if ( ! is_string( $raw ) || '' === $raw ) {
+			return;
+		}
+
+		$value = maybe_unserialize( $raw );
+		if ( ! is_array( $value ) ) {
+			return;
+		}
+
+		$changed = false;
+		foreach ( $keys as $key ) {
+			if ( array_key_exists( $key, $value ) && false !== $value[ $key ] && 0 !== $value[ $key ] && '0' !== $value[ $key ] ) {
+				$value[ $key ] = false;
+				$changed       = true;
+			}
+		}
+
+		if ( $changed ) {
+			$this->raw_update_option( $option_name, serialize( $value ) );
+		}
+	}
+
+	/**
+	 * Actualiza option_value sin pasar por prepare/update para preservar %.
+	 *
+	 * @param string $option_name Nombre de opción.
+	 * @param string $value       Valor crudo.
+	 * @return void
+	 */
+	private function raw_update_option( string $option_name, string $value ): void {
+		global $wpdb;
+
+		$dbh = $wpdb->dbh;
+		if ( $dbh instanceof \mysqli ) {
+			$esc_val  = mysqli_real_escape_string( $dbh, $value ); // phpcs:ignore WordPress.DB.RestrictedFunctions.mysql_mysqli_real_escape_string
+			$esc_name = mysqli_real_escape_string( $dbh, $option_name ); // phpcs:ignore WordPress.DB.RestrictedFunctions.mysql_mysqli_real_escape_string
+			mysqli_query( $dbh, "UPDATE `{$wpdb->options}` SET option_value = '{$esc_val}' WHERE option_name = '{$esc_name}'" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.RestrictedFunctions.mysql_mysqli_query, PluginCheck.Security.DirectDB.UnescapedDBParameter
+			return;
+		}
+
+		$esc_val  = esc_sql( $value );
+		$esc_name = esc_sql( $option_name );
+		$wpdb->query( "UPDATE `{$wpdb->options}` SET option_value = '{$esc_val}' WHERE option_name = '{$esc_name}'" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL, PluginCheck.Security.DirectDB.UnescapedDBParameter
+	}
+
+	/**
+	 * Elimina reglas .htaccess que fuerzan HTTPS cuando el destino es HTTP.
+	 *
+	 * @param string $content Contenido de .htaccess.
+	 * @return string
+	 */
+	private function strip_https_redirect_rules_from_htaccess( string $content ): string {
+		// Bloques marcados por plugins SSL comunes.
+		$content = preg_replace(
+			'/#\s*BEGIN[^\r\n]*(?:Really Simple SSL|Really_Simple_SSL|rlrsssl|SSL|HTTPS)[^\r\n]*\R.*?#\s*END[^\r\n]*(?:Really Simple SSL|Really_Simple_SSL|rlrsssl|SSL|HTTPS)[^\r\n]*\R?/is',
+			'',
+			$content
+		);
+
+		$lines  = preg_split( '/\R/', $content );
+		$output = array();
+		$count  = count( $lines );
+
+		for ( $i = 0; $i < $count; $i++ ) {
+			$line = $lines[ $i ];
+
+			if ( preg_match( '/^\s*RewriteCond\s+%\{HTTPS\}\s+(?:!=on|off|!on)\s*$/i', $line ) ) {
+				$buffer = array( $line );
+				$j      = $i + 1;
+				while ( $j < $count && preg_match( '/^\s*RewriteCond\s+/i', $lines[ $j ] ) ) {
+					$buffer[] = $lines[ $j ];
+					$j++;
+				}
+
+				if ( $j < $count && preg_match( '#^\s*RewriteRule\s+.+https://#i', $lines[ $j ] ) ) {
+					$i = $j;
+					continue;
+				}
+
+				foreach ( $buffer as $kept ) {
+					$output[] = $kept;
+				}
+				$i = $j - 1;
+				continue;
+			}
+
+			if ( preg_match( '#^\s*Redirect(?:Match)?\s+\d{3}\s+.+https://#i', $line ) ) {
+				continue;
+			}
+
+			$output[] = $line;
+		}
+
+		return trim( implode( "\n", $output ) ) . "\n";
 	}
 
 	/**
@@ -782,49 +1082,45 @@ class SSC_Restore_Manager {
 			'DB_COLLATE'  => $current_db['collate'],
 		);
 
-		foreach ( $db_map as $const => $dest_value ) {
-			if ( '' === $dest_value && in_array( $const, array( 'DB_CHARSET', 'DB_COLLATE' ), true ) ) {
-				continue; // skip empty optional constants
+			foreach ( $db_map as $const => $dest_value ) {
+				if ( '' === $dest_value && in_array( $const, array( 'DB_CHARSET', 'DB_COLLATE' ), true ) ) {
+					continue; // skip empty optional constants
+				}
+				$content = preg_replace_callback(
+					'/(\bdefine\s*\(\s*)([\'"]' . preg_quote( $const, '/' ) . '[\'"])(\s*,\s*)(.*?)(\s*\)\s*;?)/i',
+					function ( $m ) use ( $const, $dest_value, &$changes ) {
+						if ( $m[4] !== $this->php_string_literal( $dest_value ) ) {
+							$changes[] = sprintf( "%s actualizado", $const );
+						}
+						return $m[1] . $m[2] . $m[3] . $this->php_string_literal( $dest_value ) . $m[5];
+					},
+					$content
+				);
 			}
-			$content = preg_replace_callback(
-				'/(\bdefine\s*\(\s*[\'"]' . preg_quote( $const, '/' ) . '[\'"]\s*,\s*[\'"])([^\'"]*)([\'"])/i',
-				function ( $m ) use ( $const, $dest_value, &$changes ) {
-					if ( $m[2] !== $dest_value ) {
-						// Mask password in log — show only first 2 chars.
-						$log_val = ( 'DB_PASSWORD' === $const && strlen( $dest_value ) > 2 )
-							? substr( $dest_value, 0, 2 ) . str_repeat( '*', strlen( $dest_value ) - 2 )
-							: $dest_value;
-						$changes[] = sprintf( "%s actualizado", $const );
-					}
-					return $m[1] . $dest_value . $m[3];
-				},
-				$content
-			);
-		}
 
 		// $table_prefix is a variable, not a constant — match the assignment.
-		if ( ! empty( $current_db['prefix'] ) ) {
-			$content = preg_replace_callback(
-				'/(\$table_prefix\s*=\s*[\'"])([^\'"]+)([\'"])/i',
-				function ( $m ) use ( $current_db, &$changes ) {
-					if ( $m[2] !== $current_db['prefix'] ) {
-						$changes[] = sprintf( "\$table_prefix: '%s' → '%s'", $m[2], $current_db['prefix'] );
-					}
-					return $m[1] . $current_db['prefix'] . $m[3];
-				},
-				$content
-			);
+			if ( ! empty( $current_db['prefix'] ) ) {
+				$content = preg_replace_callback(
+					'/(\$table_prefix\s*=\s*)(.*?)(\s*;)/i',
+					function ( $m ) use ( $current_db, &$changes ) {
+						if ( $m[2] !== $this->php_string_literal( $current_db['prefix'] ) ) {
+							$changes[] = sprintf( "\$table_prefix: '%s' → '%s'", $m[2], $current_db['prefix'] );
+						}
+						return $m[1] . $this->php_string_literal( $current_db['prefix'] ) . $m[3];
+					},
+					$content
+				);
 		}
 
-		// ── 2. Constantes de URL ──────────────────────────────────────────────────
-		foreach ( array( 'WP_HOME', 'WP_SITEURL', 'WP_CONTENT_URL' ) as $const ) {
-			$content = preg_replace_callback(
-				'/(\bdefine\s*\(\s*[\'"]' . preg_quote( $const, '/' ) . '[\'"]\s*,\s*[\'"])([^\'"]+)([\'"])/i',
-				function ( $m ) use ( $const, $current_url, &$changes ) {
-					$old_url = $m[2];
+			// ── 2. Constantes de URL ──────────────────────────────────────────────────
+			foreach ( array( 'WP_HOME', 'WP_SITEURL', 'WP_CONTENT_URL' ) as $const ) {
+				$content = preg_replace_callback(
+					'/(\bdefine\s*\(\s*)([\'"]' . preg_quote( $const, '/' ) . '[\'"])(\s*,\s*)(.*?)(\s*\)\s*;?)/i',
+					function ( $m ) use ( $const, $current_url, &$changes ) {
+						$old_url = $this->parse_php_scalar_literal( $m[4] );
 
-					if ( 'WP_CONTENT_URL' === $const ) {
-						$parsed  = wp_parse_url( $old_url );
+						if ( 'WP_CONTENT_URL' === $const ) {
+							$parsed  = wp_parse_url( $old_url );
 						$subpath = isset( $parsed['path'] ) ? $parsed['path'] : '/wp-content';
 						$new_url = rtrim( $current_url, '/' ) . $subpath;
 					} else {
@@ -832,13 +1128,13 @@ class SSC_Restore_Manager {
 					}
 
 					if ( $old_url !== $new_url ) {
-						$changes[] = sprintf( "%s: '%s' → '%s'", $const, $old_url, $new_url );
-					}
+							$changes[] = sprintf( "%s: '%s' → '%s'", $const, $old_url, $new_url );
+						}
 
-					return $m[1] . $new_url . $m[3];
-				},
-				$content
-			);
+						return $m[1] . $m[2] . $m[3] . $this->php_string_literal( $new_url ) . $m[5];
+					},
+					$content
+				);
 		}
 
 		// ── 3. Flags SSL ──────────────────────────────────────────────────────────
@@ -877,6 +1173,31 @@ class SSC_Restore_Manager {
 				'No se pudo escribir wp-config.php — cambios no aplicados. Intentados: ' . implode( ', ', $changes )
 			);
 		}
+	}
+
+	/**
+	 * Devuelve una cadena segura para insertar como literal PHP.
+	 *
+	 * @param string $value Valor crudo.
+	 * @return string Literal PHP válido.
+	 */
+	private function php_string_literal( string $value ): string {
+		return var_export( $value, true );
+	}
+
+	/**
+	 * Intenta leer un literal escalar PHP simple.
+	 *
+	 * @param string $literal Literal capturado desde wp-config.php.
+	 * @return string Valor interpretado o fallback sin comillas.
+	 */
+	private function parse_php_scalar_literal( string $literal ): string {
+		$literal = trim( $literal );
+		if ( preg_match( '/^([\'"])(.*)\1$/s', $literal, $m ) ) {
+			return stripcslashes( $m[2] );
+		}
+
+		return trim( $literal, "\"' \t" );
 	}
 
 	/**

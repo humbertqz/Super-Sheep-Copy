@@ -96,6 +96,8 @@ class SSC_Activator {
 
 		self::write_htaccess( $dir );
 		self::write_web_config( $dir );
+		self::write_nginx_conf( $dir );
+		self::write_security_readme( $dir );
 		self::write_index( $dir );
 	}
 
@@ -145,6 +147,49 @@ class SSC_Activator {
 		$content .= "    </security>\n";
 		$content .= "  </system.webServer>\n";
 		$content .= "</configuration>\n";
+
+		file_put_contents( $file, $content ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+	}
+
+	/**
+	 * Escribe una configuración de referencia para Nginx.
+	 *
+	 * Nginx no lee archivos por directorio como .htaccess; este archivo sirve para
+	 * que administradores/hosting apliquen la regla equivalente en el vhost.
+	 *
+	 * @param string $dir Ruta absoluta al directorio.
+	 * @return void
+	 */
+	private static function write_nginx_conf( string $dir ): void {
+		$file = $dir . 'nginx-deny-example.conf';
+		if ( file_exists( $file ) ) {
+			return;
+		}
+
+		$content  = "# Super Sheep Copy - add this to the Nginx server block if this directory is web-accessible.\n";
+		$content .= "location ^~ /wp-content/uploads/ssc-backups/ {\n";
+		$content .= "    deny all;\n";
+		$content .= "    return 403;\n";
+		$content .= "}\n";
+
+		file_put_contents( $file, $content ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+	}
+
+	/**
+	 * Escribe una nota local de seguridad dentro del directorio de respaldos.
+	 *
+	 * @param string $dir Ruta absoluta al directorio.
+	 * @return void
+	 */
+	private static function write_security_readme( string $dir ): void {
+		$file = $dir . 'SECURITY-README.txt';
+		if ( file_exists( $file ) ) {
+			return;
+		}
+
+		$content  = "This directory contains full-site backups with database dumps and private files.\n";
+		$content .= "Direct web access must be denied. Apache and IIS rules are written automatically.\n";
+		$content .= "For Nginx, copy the rule from nginx-deny-example.conf into the site server block.\n";
 
 		file_put_contents( $file, $content ); // phpcs:ignore WordPress.WP.AlternativeFunctions
 	}

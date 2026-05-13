@@ -121,6 +121,27 @@ class FilesRestoreTest extends TestCase {
         $this->assertInstanceOf( \WP_Error::class, $result );
     }
 
+    /** @test */
+    public function it_skips_unsafe_directory_entries(): void {
+        $zip_path = $this->work_dir . '/backup.zip';
+        $tmp_dir  = $this->work_dir . '/tmp';
+        $target   = $this->work_dir . '/site';
+        @mkdir( $target, 0755, true ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_mkdir
+
+        $zip = new \ZipArchive();
+        $zip->open( $zip_path, \ZipArchive::CREATE | \ZipArchive::OVERWRITE );
+        $zip->addEmptyDir( '../escape' );
+        $zip->addFromString( 'index.php', '<?php' );
+        $zip->close();
+
+        $restore = $this->make_restore( $zip_path, $tmp_dir, $target );
+        $result  = $restore->run();
+
+        $this->assertTrue( $result );
+        $this->assertDirectoryDoesNotExist( $this->work_dir . '/escape' );
+        $this->assertFileExists( $target . '/index.php' );
+    }
+
     /**
      * Crea una instancia de SSC_Files_Restore que escribe a $abspath en lugar
      * de ABSPATH real (para no tocar el sistema de archivos del host).

@@ -128,6 +128,24 @@ class DatabaseRestoreTest extends TestCase {
         $this->assertFalse( $this->ends_statement( "   \n" ) );
     }
 
+    /** @test */
+    public function it_does_not_end_statement_on_semicolon_inside_multiline_string(): void {
+        $sql = "INSERT INTO `wp_options` (`option_value`) VALUES ('first line\nsecond; line";
+        $this->assertFalse( $this->ends_statement( $sql ) );
+        $this->assertTrue( $this->ends_statement( $sql . "');" ) );
+    }
+
+    /** @test */
+    public function it_does_not_end_statement_on_semicolon_inside_block_comment(): void {
+        $sql = "/* comment with ; semicolon */\nINSERT INTO `wp_options` VALUES ('ok');";
+        $this->assertTrue( $this->ends_statement( $sql ) );
+    }
+
+    /** @test */
+    public function it_allows_comments_after_statement_semicolon(): void {
+        $this->assertTrue( $this->ends_statement( "INSERT INTO `wp_options` VALUES ('ok'); -- trailing comment\n" ) );
+    }
+
     // ── Ejecución sobre archivo SQL real ─────────────────────────────────────
 
     /** @test */
@@ -136,5 +154,54 @@ class DatabaseRestoreTest extends TestCase {
         $result  = $restore->run();
         $this->assertInstanceOf( \WP_Error::class, $result );
         $this->assertSame( 'sql_not_found', $result->get_error_code() );
+    }
+
+    /** @test */
+    public function it_imports_multiline_string_with_semicolon_as_one_statement(): void {
+        $sql_file = $this->work_dir . '/database.sql';
+        file_put_contents(
+            $sql_file,
+            "INSERT INTO `wp_options` (`option_name`, `option_value`) VALUES\n('sample', 'first line\nsecond; line');\n"
+        );
+
+        $queries       = array();
+        $original_wpdb = $GLOBALS['wpdb'];
+        $GLOBALS['wpdb'] = new class( $queries ) {
+            public string $prefix = 'wp_';
+            public ?object $dbh = null;
+            public string $last_error = '';
+            public array $queries;
+
+            public function __construct( array &$queries ) {
+                $this->queries = &$queries;
+            }
+
+            public function show_errors( bool $v = true ): void {}
+
+            public function check_connection( bool $allow_bail = true ): bool {
+                return true;
+            }
+
+            public function insert( ...$args ): int {
+                return 1;
+            }
+
+            public function query( string $sql ) {
+                $this->queries[] = $sql;
+                return true;
+            }
+        };
+
+        try {
+            $restore = new \SSC_Database_Restore( $sql_file, 'wp_', 'wp_' );
+            $result  = $restore->run();
+            $queries = $GLOBALS['wpdb']->queries;
+        } finally {
+            $GLOBALS['wpdb'] = $original_wpdb;
+        }
+
+        $this->assertTrue( $result );
+        $this->assertCount( 1, $queries );
+        $this->assertStringContainsString( "second; line", $queries[0] );
     }
 }

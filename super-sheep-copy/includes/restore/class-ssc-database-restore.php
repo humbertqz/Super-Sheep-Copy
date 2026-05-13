@@ -96,20 +96,12 @@ class SSC_Database_Restore {
 			SSC_Logger::warn( 'db_restore', '$wpdb->dbh no es mysqli; usando $wpdb->query() — valores con % pueden corromperse.' );
 		}
 
-		$buffer      = '';
-		$in_string   = false;
-		$string_char = '';
+		$buffer = '';
 
 		while ( ! feof( $handle ) ) {
 			$line = fgets( $handle, 1048576 ); // 1 MB por línea máximo
 			if ( false === $line ) {
 				break;
-			}
-
-			// Omitir comentarios completos de línea.
-			$trimmed = ltrim( $line );
-			if ( ! $in_string && ( strpos( $trimmed, '--' ) === 0 || strpos( $trimmed, '#' ) === 0 ) ) {
-				continue;
 			}
 
 			// Reescribir prefijo si difiere.
@@ -119,8 +111,8 @@ class SSC_Database_Restore {
 
 			$buffer .= $line;
 
-			// Detectar fin de sentencia (';' fuera de cadenas).
-			if ( ! $in_string && $this->line_ends_statement( $line ) ) {
+			// Detectar fin de sentencia (';' fuera de cadenas/comentarios).
+			if ( $this->line_ends_statement( $buffer ) ) {
 				$stmt   = trim( $buffer );
 				$buffer = '';
 
@@ -207,16 +199,144 @@ class SSC_Database_Restore {
 	}
 
 	/**
-	 * Determina si una línea termina una sentencia SQL (acaba en ';').
+	 * Determina si un buffer SQL termina una sentencia en ';' fuera de cadenas.
 	 *
-	 * Comprobación simple y rápida: la última línea no vacía de la sentencia
-	 * termina en ';'. No maneja DELIMITER personalizado (innecesario para WP).
+	 * Maneja comillas simples, dobles, backticks y comentarios SQL comunes. No
+	 * implementa DELIMITER personalizado porque los dumps de WordPress no lo usan.
 	 *
-	 * @param string $line Línea de texto.
+	 * @param string $line Buffer SQL.
 	 * @return bool
 	 */
 	private function line_ends_statement( string $line ): bool {
-		return rtrim( $line ) !== '' && substr( rtrim( $line ), -1 ) === ';';
+		$last_statement_semicolon = -1;
+		$quote                    = '';
+		$in_line_comment          = false;
+		$in_block_comment         = false;
+		$len                      = strlen( $line );
+
+		for ( $i = 0; $i < $len; $i++ ) {
+			$char = $line[ $i ];
+			$next = ( $i + 1 < $len ) ? $line[ $i + 1 ] : '';
+
+			if ( $in_line_comment ) {
+				if ( "\n" === $char || "\r" === $char ) {
+					$in_line_comment = false;
+				}
+				continue;
+			}
+
+			if ( $in_block_comment ) {
+				if ( '*' === $char && '/' === $next ) {
+					$in_block_comment = false;
+					$i++;
+				}
+				continue;
+			}
+
+			if ( '' !== $quote ) {
+				if ( '\\' === $char ) {
+					$i++;
+					continue;
+				}
+				if ( $quote === $char ) {
+					// SQL escapes quote chars inside strings by doubling them: '' or ``.
+					if ( $next === $quote ) {
+						$i++;
+						continue;
+					}
+					$quote = '';
+				}
+				continue;
+			}
+
+			if ( '-' === $char && '-' === $next ) {
+				$prev = ( $i > 0 ) ? $line[ $i - 1 ] : "\n";
+				$after = ( $i + 2 < $len ) ? $line[ $i + 2 ] : '';
+				if ( ctype_space( $prev ) && ( '' === $after || ctype_space( $after ) ) ) {
+					$in_line_comment = true;
+					$i++;
+					continue;
+				}
+			}
+
+			if ( '#' === $char ) {
+				$in_line_comment = true;
+				continue;
+			}
+
+			if ( '/' === $char && '*' === $next ) {
+				$in_block_comment = true;
+				$i++;
+				continue;
+			}
+
+			if ( "'" === $char || '"' === $char || '`' === $char ) {
+				$quote = $char;
+				continue;
+			}
+
+			if ( ';' === $char ) {
+				$last_statement_semicolon = $i;
+			}
+		}
+
+		if ( -1 === $last_statement_semicolon || '' !== $quote || $in_block_comment ) {
+			return false;
+		}
+
+		return $this->sql_tail_is_empty_or_comment( substr( $line, $last_statement_semicolon + 1 ) );
+	}
+
+	/**
+	 * Comprueba que tras el ';' final solo haya espacios o comentarios SQL.
+	 *
+	 * @param string $tail Texto posterior al último punto y coma.
+	 * @return bool
+	 */
+	private function sql_tail_is_empty_or_comment( string $tail ): bool {
+		$len = strlen( $tail );
+		for ( $i = 0; $i < $len; $i++ ) {
+			$char = $tail[ $i ];
+			$next = ( $i + 1 < $len ) ? $tail[ $i + 1 ] : '';
+
+			if ( ctype_space( $char ) ) {
+				continue;
+			}
+
+			if ( '#' === $char ) {
+				while ( $i < $len && "\n" !== $tail[ $i ] && "\r" !== $tail[ $i ] ) {
+					$i++;
+				}
+				continue;
+			}
+
+			if ( '-' === $char && '-' === $next ) {
+				$after = ( $i + 2 < $len ) ? $tail[ $i + 2 ] : '';
+				if ( '' === $after || ctype_space( $after ) ) {
+					$i += 2;
+					while ( $i < $len && "\n" !== $tail[ $i ] && "\r" !== $tail[ $i ] ) {
+						$i++;
+					}
+					continue;
+				}
+			}
+
+			if ( '/' === $char && '*' === $next ) {
+				$i += 2;
+				while ( $i + 1 < $len && ! ( '*' === $tail[ $i ] && '/' === $tail[ $i + 1 ] ) ) {
+					$i++;
+				}
+				if ( $i + 1 >= $len ) {
+					return false;
+				}
+				$i++;
+				continue;
+			}
+
+			return false;
+		}
+
+		return true;
 	}
 
 	/**

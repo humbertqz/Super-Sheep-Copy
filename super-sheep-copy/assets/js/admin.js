@@ -539,7 +539,7 @@
     var failCount = 0;
     var notFoundCount = 0; // respuestas "job no encontrado" consecutivas
     var MAX_FAILS = 8; // errores de red consecutivos antes de rendirse
-    var MAX_NOT_FOUND = 10; // "job no encontrado" consecutivos antes de asumir completado (restore)
+    var MAX_NOT_FOUND = 60; // restore can briefly lose transients while DB/options are replaced
     var startedAt = Date.now();
 
     pollInterval = setInterval(function () {
@@ -579,23 +579,18 @@
             return;
           }
           if (!response || !response.success || !response.data) {
-            // 404 = job no encontrado. Puede que la DB fue reemplazada por un restore
-            // y el transient de estado ya no existe. Si ocurre varias veces seguidas,
-            // asumir que la operación terminó (o el lock es un residuo del site de origen).
+            // During restore the DB/options table is replaced, so transients can disappear
+            // temporarily. Do not treat that as success; keep polling until explicit
+            // completed/failed or the post-completion session invalidation happens.
             notFoundCount++;
             if (notFoundCount >= MAX_NOT_FOUND) {
               clearInterval(pollInterval);
               pollInterval = null;
               currentJobId = null;
-              if ("ssc_get_restore_status" === statusAction) {
-                onComplete({});
-              } else {
-                // Para backup: ocultar la barra y avisar sin error (el proceso pudo terminar).
-                onFailed(
-                  sscData.strings.errorPollTimeout || sscData.strings.error,
-                  true,
-                );
-              }
+              onFailed(
+                sscData.strings.errorPollTimeout || sscData.strings.error,
+                true,
+              );
             }
             return;
           }
@@ -636,7 +631,10 @@
               clearInterval(pollInterval);
               pollInterval = null;
               currentJobId = null;
-              onComplete({});
+              onFailed(
+                sscData.strings.errorPollTimeout || sscData.strings.error,
+                true,
+              );
             }
             return;
           }
@@ -927,7 +925,7 @@
 
   // ── Modal: restauración completada ─────────────────────────────────────
   function openRestoreDoneModal() {
-    var loginUrl = sscData.loginUrl ? sscData.loginUrl : "/wp-login.php";
+    var loginUrl = getRestoreLoginUrl();
     var $modal = $("#ssc-restore-done-modal");
     if (!$modal.length) {
       $("body").append(
@@ -942,9 +940,7 @@
           "<p>El sitio ha sido restaurado correctamente. Por seguridad, tu sesión ha sido cerrada.</p>" +
           "<p>Necesitarás autenticarte de nuevo para continuar trabajando en el administrador.</p>" +
           '<div class="ssc-restore-done-actions">' +
-          '<a id="ssc-restore-done-login" href="' +
-          loginUrl +
-          '" class="ssc-btn-success">Ir al inicio de sesión</a>' +
+          '<a id="ssc-restore-done-login" href="#" class="ssc-btn-success">Ir al inicio de sesión</a>' +
           "</div></div></div></div>",
       );
       $modal = $("#ssc-restore-done-modal");
@@ -952,6 +948,38 @@
     $("#ssc-restore-done-login").attr("href", loginUrl);
     $modal.removeAttr("hidden").css("display", "flex");
     $("#ssc-restore-done-login").trigger("focus");
+  }
+
+  function getRestoreLoginUrl() {
+    var fallback = sscData.loginUrl ? sscData.loginUrl : "/wp-login.php";
+    var adminMarker = "/wp-admin/";
+    var adminIndex = window.location.pathname.indexOf(adminMarker);
+
+    if (adminIndex === -1) {
+      return fallback;
+    }
+
+    var wpBasePath = window.location.pathname.substring(0, adminIndex);
+    var localLogin =
+      window.location.protocol +
+      "//" +
+      window.location.host +
+      wpBasePath +
+      "/wp-login.php";
+
+    try {
+      var fallbackUrl = new URL(fallback, window.location.href);
+      if (
+        fallbackUrl.protocol !== window.location.protocol ||
+        fallbackUrl.host !== window.location.host ||
+        fallbackUrl.pathname.indexOf(wpBasePath + "/") !== 0
+      ) {
+        return localLogin;
+      }
+      return fallbackUrl.href;
+    } catch (e) {
+      return localLogin;
+    }
   }
 
   // ── Cancelar restauración atascada ─────────────────────────────────────
