@@ -106,7 +106,7 @@ if ( $last_mtime > 0 ) {
 				<div class="ssc-brand-text">
 					<h1 class="ssc-page-title">
 						<?php esc_html_e( 'Super Sheep Copy', 'super-sheep-copy' ); ?>
-						<span class="ssc-version-badge">v<?php echo esc_html( SSC_VERSION ); ?></span>
+						<a href="https://github.com/humbertqz/Super-Sheep-Copy/commits/master/" target="_blank" rel="noopener noreferrer" class="ssc-version-badge">v<?php echo esc_html( SSC_VERSION ); ?></a>
 					</h1>
 					<p class="ssc-page-subtitle"><?php esc_html_e( 'Archivos + base de datos · Restauración con reescritura de URLs', 'super-sheep-copy' ); ?></p>
 				</div>
