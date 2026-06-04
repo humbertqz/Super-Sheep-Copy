@@ -1,23 +1,28 @@
 {
-    "name": "super-sheep-copy/super-sheep-copy",
-    "description": "Super Sheep Copy WordPress plugin",
-    "type": "wordpress-plugin",
-    "require-dev": {
-        "phpunit/phpunit": "^10.5",
-        "brain/monkey": "^2.6",
-        "mockery/mockery": "^1.6"
-    },
-    "autoload-dev": {
-        "psr-4": {
-            "SSC\\Tests\\": "tests/"
-        }
-    },
-    "config": {
-        "allow-plugins": {
-            "composer/installers": true
-        }
-    },
-    "scripts": {
-        "test": "phpunit"
+  "name": "super-sheep/super-sheep-copy",
+  "description": "WordPress full backup and restore plugin scaffold.",
+  "type": "wordpress-plugin",
+  "license": "proprietary",
+  "autoload": {
+    "psr-4": {
+      "SuperSheepCopy\\": "src/",
+      "SuperSheepCopy\\Shared\\": "shared/"
     }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "SuperSheepCopy\\Tests\\": "tests/"
+    }
+  },
+  "require": {
+    "php": ">=7.4"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "^9.6"
+  },
+  "scripts": {
+    "test": "phpunit",
+    "lint": "find . -name '*.php' -not -path './vendor/*' -print0 | xargs -0 -n1 php -l",
+    "build": "@php bin/build.php"
+  }
 }

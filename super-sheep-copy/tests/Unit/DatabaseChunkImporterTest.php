@@ -1,0 +1,208 @@
+<?php
+
+declare(strict_types=1);
+
+namespace SuperSheepCopy\Tests\Unit;
+
+use PHPUnit\Framework\TestCase;
+
+require_once dirname(__DIR__, 2) . '/installer/restore-engine/DatabaseChunkImporter.php';
+require_once dirname(__DIR__, 2) . '/installer/restore-engine/SqlTableNameRewriter.php';
+
+final class DatabaseChunkImporterTest extends TestCase
+{
+    public function testSplitsPluginGeneratedSqlStatements(): void
+    {
+        $sql = "DROP TABLE IF EXISTS `tmp`;\nCREATE TABLE `tmp` (`ID` bigint);\nINSERT INTO `tmp` (`name`) VALUES ('semi; colon');\n";
+
+        $statements = (new \SuperSheepCopyInstaller\DatabaseChunkImporter())->splitStatementsForTest($sql);
+
+        self::assertCount(3, $statements);
+        self::assertSame('DROP TABLE IF EXISTS `tmp`', $statements[0]);
+        self::assertSame('CREATE TABLE `tmp` (`ID` bigint)', $statements[1]);
+        self::assertSame("INSERT INTO `tmp` (`name`) VALUES ('semi; colon')", $statements[2]);
+    }
+
+    public function testRejectsOriginalDestinationDropStatement(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Unsafe SQL statement for staged import.');
+
+        (new \SuperSheepCopyInstaller\DatabaseChunkImporter())->assertSafeStatementForTest(
+            'DROP TABLE IF EXISTS `wp_posts`',
+            array('ssc_tmp_hash_wp_posts')
+        );
+    }
+
+    public function testAllowsStagingDropStatement(): void
+    {
+        (new \SuperSheepCopyInstaller\DatabaseChunkImporter())->assertSafeStatementForTest(
+            'DROP TABLE IF EXISTS `ssc_tmp_hash_wp_posts`',
+            array('ssc_tmp_hash_wp_posts')
+        );
+
+        self::assertTrue(true);
+    }
+
+    public function testRejectsUpdateStatement(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Unsafe SQL statement for staged import.');
+
+        (new \SuperSheepCopyInstaller\DatabaseChunkImporter())->assertSafeStatementForTest(
+            "UPDATE `ssc_tmp_hash_wp_posts` SET `post_title` = 'changed'",
+            array('ssc_tmp_hash_wp_posts')
+        );
+    }
+
+    public function testImportsRewrittenChunkStatementsToStagingTables(): void
+    {
+        $connection = new DatabaseChunkImporterFakeConnection();
+        $importer = new class($connection) extends \SuperSheepCopyInstaller\DatabaseChunkImporter {
+            private DatabaseChunkImporterFakeConnection $connection;
+
+            public function __construct(DatabaseChunkImporterFakeConnection $connection)
+            {
+                $this->connection = $connection;
+            }
+
+            protected function connect(array $credentials)
+            {
+                return $this->connection;
+            }
+        };
+
+        $result = $importer->import(
+            array('host' => 'localhost', 'user' => 'root', 'password' => '', 'name' => 'wordpress', 'charset' => 'utf8mb4'),
+            array(array('name' => 'wp_posts', 'chunks' => array('wp_posts.part001.sql'))),
+            array('wp_posts.part001.sql' => "DROP TABLE IF EXISTS `wp_posts`;\nCREATE TABLE `wp_posts` (`ID` bigint);\nINSERT INTO `wp_posts` (`post_title`) VALUES ('semi; colon');"),
+            array('wp_posts' => 'ssc_tmp_hash_wp_posts'),
+            new \SuperSheepCopyInstaller\SqlTableNameRewriter()
+        );
+
+        self::assertSame(array(
+            'imported' => true,
+            'table_count' => 1,
+            'chunk_count' => 1,
+            'statement_count' => 3,
+            'warnings' => array(),
+        ), $result);
+        self::assertSame(array(
+            'DROP TABLE IF EXISTS `ssc_tmp_hash_wp_posts`',
+            'CREATE TABLE `ssc_tmp_hash_wp_posts` (`ID` bigint)',
+            "INSERT INTO `ssc_tmp_hash_wp_posts` (`post_title`) VALUES ('semi; colon')",
+        ), $connection->statements);
+        self::assertSame('utf8mb4', $connection->charset);
+        self::assertSame(array('set_charset:utf8mb4', 'query', 'query', 'query'), $connection->events);
+        self::assertTrue($connection->closed);
+    }
+
+    public function testReportsFailedStatementDetailsWithoutCredentials(): void
+    {
+        $connection = new DatabaseChunkImporterFakeConnection();
+        $connection->fail_on_statement = 2;
+        $connection->errno = 1273;
+        $connection->error = 'Unknown collation: utf8mb4_0900_ai_ci';
+        $importer = new class($connection) extends \SuperSheepCopyInstaller\DatabaseChunkImporter {
+            private DatabaseChunkImporterFakeConnection $connection;
+
+            public function __construct(DatabaseChunkImporterFakeConnection $connection)
+            {
+                $this->connection = $connection;
+            }
+
+            protected function connect(array $credentials)
+            {
+                return $this->connection;
+            }
+        };
+
+        $result = $importer->import(
+            array('host' => 'localhost', 'user' => 'secret_user', 'password' => 'secret_password', 'name' => 'wordpress'),
+            array(array('name' => 'wp_posts', 'chunks' => array('wp_posts.part001.sql'))),
+            array('wp_posts.part001.sql' => "DROP TABLE IF EXISTS `wp_posts`;\nCREATE TABLE `wp_posts` (`ID` bigint) COLLATE=utf8mb4_0900_ai_ci;"),
+            array('wp_posts' => 'ssc_tmp_hash_wp_posts'),
+            new \SuperSheepCopyInstaller\SqlTableNameRewriter()
+        );
+
+        self::assertFalse($result['imported']);
+        self::assertSame(1, $result['statement_count']);
+        self::assertStringContainsString('Database import statement failed for wp_posts.part001.sql in table wp_posts.', $result['warnings'][0]);
+        self::assertStringContainsString('MySQL 1273: Unknown collation: utf8mb4_0900_ai_ci', $result['warnings'][0]);
+        self::assertStringContainsString('CREATE TABLE `ssc_tmp_hash_wp_posts`', $result['warnings'][0]);
+        self::assertStringNotContainsString('secret_user', $result['warnings'][0]);
+        self::assertStringNotContainsString('secret_password', $result['warnings'][0]);
+    }
+
+    public function testFailsWhenTableImportDoesNotCreateExpectedStagingTable(): void
+    {
+        $connection = new DatabaseChunkImporterFakeConnection();
+        $importer = new class($connection) extends \SuperSheepCopyInstaller\DatabaseChunkImporter {
+            private DatabaseChunkImporterFakeConnection $connection;
+
+            public function __construct(DatabaseChunkImporterFakeConnection $connection)
+            {
+                $this->connection = $connection;
+            }
+
+            protected function connect(array $credentials)
+            {
+                return $this->connection;
+            }
+        };
+
+        $result = $importer->import(
+            array('host' => 'localhost', 'user' => 'root', 'password' => '', 'name' => 'wordpress'),
+            array(array('name' => 'wp_actionscheduler_actions', 'chunks' => array('wp_actionscheduler_actions.part001.sql'))),
+            array('wp_actionscheduler_actions.part001.sql' => "DROP TABLE IF EXISTS `wp_actionscheduler_actions`;"),
+            array('wp_actionscheduler_actions' => 'ssc_tmp_hash_wp_actionscheduler_actions'),
+            new \SuperSheepCopyInstaller\SqlTableNameRewriter()
+        );
+
+        self::assertFalse($result['imported']);
+        self::assertSame(array('Database import did not create staging table ssc_tmp_hash_wp_actionscheduler_actions for source table wp_actionscheduler_actions. Check that the backup contains a CREATE TABLE statement for wp_actionscheduler_actions.'), $result['warnings']);
+        self::assertTrue($connection->closed);
+    }
+}
+
+final class DatabaseChunkImporterFakeConnection
+{
+    public int $connect_errno = 0;
+
+    /** @var list<string> */
+    public array $statements = array();
+
+    public bool $closed = false;
+    public int $fail_on_statement = 0;
+    public int $errno = 0;
+    public string $error = '';
+    public string $charset = '';
+
+    /** @var list<string> */
+    public array $events = array();
+
+    public function set_charset(string $charset): bool
+    {
+        $this->charset = $charset;
+        $this->events[] = 'set_charset:' . $charset;
+
+        return true;
+    }
+
+    public function query(string $statement): bool
+    {
+        $this->statements[] = $statement;
+        $this->events[] = 'query';
+
+        if ($this->fail_on_statement === count($this->statements)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    public function close(): void
+    {
+        $this->closed = true;
+    }
+}

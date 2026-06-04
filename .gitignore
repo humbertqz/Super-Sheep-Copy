@@ -1,44 +1,79 @@
-# AI
-/.agents
-/.claude
-/skills
-/skills-lock.json
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.AppleDouble
+.LSOverride
+.Spotlight-V100/
+.Trashes/
+.fseventsd/
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
 
-# Local
-fsb.zip
-*.zip
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.local
 
-# Logs
-logs
+# Dependencies
+vendor/
+super-sheep-copy/vendor/
+node_modules/
+super-sheep-copy/node_modules/
+composer.phar
+
+# Test and analysis output
+.phpunit.result.cache
+super-sheep-copy/.phpunit.result.cache
+coverage/
+super-sheep-copy/coverage/
+.phpunit.cache/
+super-sheep-copy/.phpunit.cache/
+.php-cs-fixer.cache
+.phpcs-cache
+.phpstan.cache
+.phpstan/
+.psalm-cache/
+.psalm/
+.cache/
+
+# Logs and temporary files
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
-lerna-debug.log*
+*.tmp
+*.temp
+*.bak
+*.orig
+*.rej
+tmp/
+temp/
+super-sheep-copy/tmp/
+super-sheep-copy/temp/
 
-node_modules
-dist
-dist-ssr
-*.local
+# Build and release artifacts
+build/
+dist/
+release/
+super-sheep-copy/build/
+super-sheep-copy/dist/
+super-sheep-copy/release/
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.tar.bz2
+*.tar.xz
 
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
-**/.DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
-
-# PHP / Composer
-# Installed packages — restore with: composer install
-super-sheep-copy/vendor/
-
-# PHPUnit
-# Test-result cache written after each run (machine-specific)
-super-sheep-copy/.phpunit.result.cache
-# Code coverage reports (generated with --coverage-html)
-super-sheep-copy/tests/coverage/
+# Super Sheep Copy generated backup/restore output
+super-sheep-copy/backups/
+super-sheep-copy/backup/
+super-sheep-copy/restore-packages/
+super-sheep-copy/installer-packages/
+super-sheep-copy/super-sheep-copy-backup-*
+super-sheep-copy/installer-token*

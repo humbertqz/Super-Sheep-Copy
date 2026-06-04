@@ -1,170 +1,156 @@
 <p align="center">
-  <img src="super-sheep-copy/assets/images/super-sheep-copy-logo.png" alt="Super Sheep Copy" width="200">
+  <img src="super-sheep-copy/assets/images/super-sheep-copy-logo.png" alt="Super Sheep Copy logo" width="160">
 </p>
 
 # Super Sheep Copy
 
-**Full-site backup plugin for WordPress.** Creates complete ZIP archives of your site (files + database), lets you download or delete them, and restores them with safe URL rewriting for domain migrations.
+Super Sheep Copy is a WordPress plugin for creating full-site backup packages and preparing controlled restores through a standalone installer. It is built for practical migration and recovery workflows: package the current site, validate a backup on the destination site, prepare restore tooling, then run restore steps only after explicit confirmation.
 
-![Super Sheep Copy admin screen](super-sheep-copy/assets/images/screenshot-1.png)
+<p align="center">
+  <img src="super-sheep-copy/assets/images/screenshot-1.jpg" alt="Super Sheep Copy backup admin screen" width="900">
+</p>
 
----
+## Current Features
 
-## Features
+### Full-Site Backups
 
-### Backups
+- Creates full-site backup jobs from the WordPress admin.
+- Runs backups through incremental AJAX/background steps so admin requests stay responsive.
+- Exports prefixed WordPress database tables into chunked SQL files.
+- Uses adaptive database chunk sizes and file scan batch sizes during long backups.
+- Scans site files and excludes plugin backup storage, VCS folders, `node_modules`, OS metadata files, and optionally `wp-content/cache`.
+- Optionally skips files above the configured large-file limit.
+- Packages database exports, site files, manifests, metadata, and checksums into the best available package format.
+- Supports ZIP packages, TAR/GZ packages, and directory packages depending on server capabilities.
+- Tracks job state, progress messages, performance summaries, archive size, and validation status.
+- Supports retrying or continuing failed/incomplete backup jobs from the Jobs table.
+- Lets administrators download completed backup archives.
+- Allows backup/restore job deletion from the admin.
+- Applies retention cleanup for completed backups.
+- Stops running backup jobs that appear to belong to a different site or upload directory.
 
-- **Full-site ZIP** — packages all of `wp-content/`, root config files (`.htaccess`, `wp-config.php`, `robots.txt`, etc.), and optionally the WordPress core directories (`wp-admin/` and `wp-includes/`).
-- **Database dump** — exports all tables matching the configured prefix. Falls back to a pure-PHP streamed dump when `mysqldump` is unavailable.
-- **manifest.json** — every ZIP includes a manifest with site URL, PHP/WP versions, table prefix, charset, file count, DB size, and a SHA-256 checksum of the archive.
-- **Checksum file** — a companion `.sha256` file is created next to each ZIP for integrity verification.
-- **Pre-restore snapshot** — before overwriting anything during a restore, the plugin automatically creates a safety backup of the current site state.
-- **Smart naming** — backup filenames include a timestamp and a random 8-character hex token to prevent enumeration (`backup-20260422-143055-a3f9b2c1.zip`).
+### Backup Settings
 
-### Backup list
+- Exclude or include cache folders in backups.
+- Skip or include very large files using a configurable 10-2048 MB size limit.
+- Configure retention for 1-20 successful backups.
+- Auto-clean failed backup files after 24 hours.
+- Manually clean failed backup files.
+- Enable debug logging.
+- Download a diagnostic report with plugin and environment details.
+- View backup storage location, storage usage, and latest backup summary.
+- Default settings exclude cache folders, skip files over 250 MB, retain 5 successful backups, auto-clean failed jobs, and keep debug logging disabled.
 
-- Shows filename, date, size, type badge (Manual / Automatic / Scheduled), and short checksum.
-- **Download** — served through an authenticated admin endpoint (`readfile()`). No direct file URL is exposed.
-- **Restore** — one-click restore from any listed backup.
-- **Delete** — with confirmation; supports bulk deletion.
-- **View manifest** — inline modal showing the full `manifest.json` content.
+### Restore Preparation
 
-### Restoration
+- Validates Super Sheep Copy backup packages before restore tooling is prepared.
+- Accepts `.zip`, `.tar`, and `.tar.gz` packages uploaded through WordPress for smaller backups.
+- Supports large packages placed in the restore folder by FTP/SFTP.
+- Supports staged directory packages when a directory contains a valid `manifest.json`.
+- Lists staged restore packages from the restore folder.
+- Allows staged restore packages to be selected or deleted.
+- Displays validated backup details, including source URLs, active theme/plugins, table prefix, archive entry count, and database entry count.
+- Prunes restore jobs when their staged package no longer exists.
+- Prepares a token-protected standalone installer for the selected restore job.
 
-- Validates the ZIP (magic bytes + `manifest.json` check + optional checksum comparison) before doing anything.
-- Extracts files to a temporary directory first, then moves them atomically.
-- Imports the SQL dump statement-by-statement, handling multi-line statements and DELIMITER changes.
-- Automatically rewrites the old `siteurl`/`home` and all serialized option values if you are restoring to a different domain or path (**serialize-safe URL rewriting** — updates `s:N:"..."` lengths correctly so WordPress-serialized data is never broken).
-- Flushes rewrite rules and object cache after import.
-- Force-logs out all active sessions after a restore (security measure when importing a foreign database).
+### Standalone Installer
 
-### Upload methods
+The restore process is intentionally separated from the normal WordPress admin flow. After a backup is validated, Super Sheep Copy prepares a standalone installer that handles the destructive restore workflow.
 
-Backup ZIPs can reach the server in two ways:
+The installer includes support for:
 
-| Method             | How                                                                                                             |
-| ------------------ | --------------------------------------------------------------------------------------------------------------- |
-| Browser upload     | Use the **Restaurar** page form — max size is the lesser of the plugin setting and the PHP server limit.        |
-| FTP / file manager | Upload the ZIP directly to `wp-content/uploads/fsb-backups/` — it will appear in the backup list automatically. |
+- Token-protected launch URLs.
+- Environment and destination preflight checks.
+- Restore confirmation before destination changes are made.
+- Rollback file collection and rollback database dumps.
+- Database import preparation and chunked database import.
+- Staged table swap execution.
+- URL replacement planning and execution.
+- Serialized value-safe URL replacement helpers.
+- File restore management.
+- Package path guards for archive extraction safety.
 
-### Settings
+### Admin Experience
 
-- **Include WordPress core** — toggle whether `wp-admin/` and `wp-includes/` are packaged in the backup (on by default; useful for bare-metal restores).
-- **Exclude large logs** — skip `.log` and `.tmp` files to reduce archive size.
-- **Max upload size** — configurable MB limit for browser uploads. The UI shows the actual PHP server limit (`upload_max_filesize` / `post_max_size`) and the resulting effective limit (whichever is lower). Saving a value that exceeds the server limit triggers an admin warning.
-
-### Audit log
-
-- Every backup and restore operation is recorded in the `{prefix}fsb_audit_log` table.
-- Log entries are grouped by operation (job ID), showing overall status, duration, file name, user, error/warning counts, and a full expandable entry table.
-- Actions include: expand all, collapse all, clear log.
-
----
+- Adds **Super Sheep Copy** admin navigation with **Backup**, **Restore**, and **Settings** pages.
+- Shows environment checks and manifest previews before backup creation.
+- Shows current backup progress, running indicators, job history, archive sizes, validation labels, and performance summaries.
+- Uses the custom backup management capability (`manage_super_sheep_copy_backups`) with nonce checks for mutating admin actions.
 
 ## Requirements
 
-| Requirement   | Minimum                          |
-| ------------- | -------------------------------- |
-| WordPress     | 6.0                              |
-| PHP           | 7.4 (8.1+ recommended)           |
-| PHP extension | `ZipArchive`                     |
-| Server        | Apache, LiteSpeed, Nginx, or IIS |
+- WordPress 6.0 or newer.
+- PHP 7.4 or newer.
+- At least one package writer available on the server: ZIP, TAR/GZ, or directory package fallback.
+- Write access to the WordPress uploads directory.
+- Administrator access with the plugin backup-management capability.
 
----
+Backups are stored under the WordPress uploads directory in:
+
+```text
+wp-content/uploads/super-sheep-copy
+```
+
+Large restore packages can be placed in:
+
+```text
+wp-content/uploads/super-sheep-copy/restore
+```
 
 ## Installation
 
-1. Upload the `full-site-backup/` folder to `wp-content/plugins/`.
-2. Activate the plugin from **Plugins → Installed Plugins**.
-3. On activation the plugin automatically:
-   - Creates `wp-content/uploads/fsb-backups/` with `.htaccess`, `web.config`, and `index.php` protection files.
-   - Creates the `{prefix}fsb_audit_log` database table.
-   - Adds the `manage_fsb_backups` capability to the Administrator role.
+1. Build or copy the `super-sheep-copy` plugin directory into `wp-content/plugins/`.
+2. Activate **Super Sheep Copy** in the WordPress admin.
+3. Open **Super Sheep Copy > Backup** to create and monitor backups.
+4. Open **Super Sheep Copy > Restore** to validate a package and prepare the standalone installer.
+5. Open **Super Sheep Copy > Settings** to review backup defaults, storage, cleanup, and diagnostics.
 
----
+## Development
 
-## Usage
+Install PHP dependencies:
 
-### Creating a backup
-
-1. Go to **Respaldos** in the WordPress admin sidebar.
-2. Click **Crear respaldo ahora**.
-3. A progress bar tracks the operation (DB dump → file packaging → manifest → checksum).
-4. The new backup appears in the list when complete.
-
-### Restoring a backup
-
-**Option A — from the backup list:**
-
-1. Go to **Respaldos**, find the backup you want, and click **Restaurar**.
-2. Confirm the dialog. A pre-restore safety backup is created automatically.
-3. Wait for the progress bar to complete.
-4. You will be logged out and redirected to the login screen (security measure).
-
-**Option B — upload a ZIP:**
-
-1. Go to **Restaurar** in the sidebar.
-2. Select your `.zip` file and click **Subir y restaurar**.
-3. Same flow as above.
-
-**Option C — via FTP or hosting file manager:**
-
-1. Connect to your server.
-2. Navigate to `wp-content/uploads/fsb-backups/`.
-3. Upload the `.zip` file.
-4. Go to **Respaldos** — the file appears in the list and can be restored from there.
-
-### Configuring settings
-
-Go to **Ajustes** to adjust which files are included in backups and the maximum upload size for browser restores.
-
-### Viewing the log
-
-Go to **Log de auditoría** to review all past backup and restore operations, including per-entry timestamps, actions, results, and error messages.
-
----
-
-## Backup storage
-
-All backups are stored at:
-
-```
-wp-content/uploads/fsb-backups/
+```bash
+cd super-sheep-copy
+composer install
 ```
 
-The directory is protected against direct HTTP access by:
+Run the test suite:
 
-- `.htaccess` (`Require all denied` / `Deny from all`) — Apache / LiteSpeed
-- `web.config` (`<deny users="*">`) — IIS
-- `index.php` — silent fallback preventing directory listing on any server
+```bash
+composer test
+```
 
-Backups are **never served by URL**. All downloads go through `wp-admin/admin-post.php` with nonce and capability verification.
+Run PHP syntax checks:
 
----
+```bash
+composer lint
+```
 
-## Security notes
+Build a distributable plugin package:
 
-- All admin actions require the `manage_fsb_backups` capability (assigned to Administrators).
-- Every form and AJAX request is protected by a WordPress nonce.
-- Uploaded ZIP files are validated by magic bytes (`PK\x03\x04`), file extension, and `manifest.json` presence before any processing begins.
-- Path traversal and Zip Slip attacks are blocked: every extracted path is validated against the target directory using `realpath()`.
-- When `mysqldump` is used, credentials are passed via a temporary `--defaults-extra-file` (chmod 600, deleted after use) — never via command-line arguments visible in `ps aux`.
-- A concurrency lock (`fsb_backup_running` / `fsb_restore_running` transients) prevents simultaneous operations.
+```bash
+composer build
+```
 
----
+## Repository Layout
 
-## What is excluded from backups
+```text
+super-sheep-copy/
+  assets/                 Admin CSS, JavaScript, and logo assets
+  installer/              Standalone restore installer and restore engine
+  shared/                 Shared archive, serialization, and URL replacement utilities
+  src/                    WordPress plugin source code
+  templates/              Admin page templates
+  tests/                  PHPUnit tests
+  super-sheep-copy.php    Plugin bootstrap file
+```
 
-The following are excluded by default to prevent recursion and reduce archive size:
+## Security Notes
 
-- `wp-content/uploads/fsb-backups/` (the plugin's own backup directory)
-- `.DS_Store`, `Thumbs.db`
-- Large `.log` and `.tmp` files (when the setting is enabled)
+Backup packages contain sensitive site data, including users, password hashes, private content, order data, API keys, and configuration values. Store generated package files securely, restrict access to backup storage, and remove old packages when they are no longer needed.
 
-Exclusions are configurable in **Ajustes**.
+Restore operations can replace files and database content on the destination site. The plugin validates archives and prepares restore tooling from the WordPress admin, but destination changes are performed through the standalone installer after confirmation.
 
----
+## Status
 
-## License
-
-This plugin is licensed under the GNU General Public License v3.0 or later.
+Super Sheep Copy is version `0.1.0`. The repository currently contains the backup workflow, restore preparation workflow, standalone installer engine, settings screens, diagnostics, package reader/writer layers, URL replacement utilities, rollback helpers, and PHPUnit coverage for the core backup and restore components.

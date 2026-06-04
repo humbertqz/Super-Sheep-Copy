@@ -1,16 +1,14 @@
 <?php
 /**
  * Plugin Name: Super Sheep Copy
- * Description: Respaldos completos (archivos + DB) con restauración y reescritura de URLs.
- * Version:     0.0.33
- * Requires at least: 6.0
- * Requires PHP: 7.4
+ * Description: Full-site backup and restore tooling scaffold.
+ * Version: 0.1.0
  * Author: Humberto Quezada
- * Author URI: https://github.com/humbertqz/Super-Sheep-Copy
- * License: GPL v3 or later
+ * License: GPLv3 or later
  * License URI: https://www.gnu.org/licenses/gpl-3.0.html
+ * Requires PHP: 7.4
+ * Requires at least: 6.0
  * Text Domain: super-sheep-copy
- * Domain Path: /languages
  */
 
 /*
@@ -30,96 +28,45 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-if ( ! defined( 'ABSPATH' ) ) {
-	exit;
+declare(strict_types=1);
+
+if (!defined('ABSPATH')) {
+    exit;
 }
 
-// ── Versión mínima requerida ──────────────────────────────────────────────────
-define( 'SSC_MIN_PHP', '7.4' );
-define( 'SSC_MIN_WP',  '6.0' );
+define('SUPER_SHEEP_COPY_VERSION', '0.1.0');
+define('SUPER_SHEEP_COPY_FILE', __FILE__);
+define('SUPER_SHEEP_COPY_DIR', plugin_dir_path(__FILE__));
+define('SUPER_SHEEP_COPY_URL', plugin_dir_url(__FILE__));
 
-// ── Verificación temprana de requisitos ──────────────────────────────────────
-if ( version_compare( PHP_VERSION, SSC_MIN_PHP, '<' ) ) {
-	add_action( 'admin_notices', function () {
-		echo '<div class="notice notice-error"><p>' .
-			esc_html(
-				sprintf(
-					/* translators: 1: required PHP version, 2: current PHP version */
-					__( 'Super Sheep Copy requiere PHP %1$s o superior. Tu servidor usa PHP %2$s.', 'super-sheep-copy' ),
-					SSC_MIN_PHP,
-					PHP_VERSION
-				)
-			) .
-			'</p></div>';
-	} );
-	return;
+$super_sheep_copy_autoload = SUPER_SHEEP_COPY_DIR . 'vendor/autoload.php';
+if (is_readable($super_sheep_copy_autoload)) {
+    require_once $super_sheep_copy_autoload;
+} else {
+    spl_autoload_register(static function (string $class): void {
+        $prefixes = array(
+            'SuperSheepCopy\\Shared\\' => SUPER_SHEEP_COPY_DIR . 'shared/',
+            'SuperSheepCopy\\' => SUPER_SHEEP_COPY_DIR . 'src/',
+        );
+
+        foreach ($prefixes as $prefix => $base_dir) {
+            $length = strlen($prefix);
+            if (strncmp($prefix, $class, $length) !== 0) {
+                continue;
+            }
+
+            $relative = substr($class, $length);
+            $file = $base_dir . str_replace('\\', '/', $relative) . '.php';
+            if (is_readable($file)) {
+                require_once $file;
+            }
+        }
+    });
 }
 
-// ── Constantes globales ───────────────────────────────────────────────────────
-define( 'SSC_VERSION',     '0.0.33' );
-define( 'SSC_PLUGIN_FILE', __FILE__ );
-define( 'SSC_PLUGIN_DIR',  plugin_dir_path( __FILE__ ) );
-define( 'SSC_PLUGIN_URL',  plugin_dir_url( __FILE__ ) );
-define( 'SSC_BACKUPS_DIR', WP_CONTENT_DIR . '/uploads/ssc-backups/' );
+register_activation_hook(__FILE__, array(\SuperSheepCopy\Plugin::class, 'activate'));
+register_deactivation_hook(__FILE__, array(\SuperSheepCopy\Plugin::class, 'deactivate'));
 
-// ── Autoloader simple ─────────────────────────────────────────────────────────
-/**
- * Carga automática de clases SSC_ buscando en el mapa de archivos.
- *
- * @param string $class_name Nombre de la clase a cargar.
- */
-function ssc_autoloader( string $class_name ): void {
-	if ( strpos( $class_name, 'SSC_' ) !== 0 ) {
-		return;
-	}
-
-	/*
-	 * Mapa clase → ruta relativa a SSC_PLUGIN_DIR.
-	 * Mantener ordenado alfabéticamente por clave.
-	 */
-	$class_map = array(
-		// Admin
-		'SSC_Admin'             => 'includes/admin/class-ssc-admin.php',
-		'SSC_Admin_Ajax'        => 'includes/admin/class-ssc-admin-ajax.php',
-		'SSC_List_Table'        => 'includes/admin/class-ssc-list-table.php',
-		// Backup
-		'SSC_Backup_Manager'    => 'includes/backup/class-ssc-backup-manager.php',
-		'SSC_Database_Backup'   => 'includes/backup/class-ssc-database-backup.php',
-		'SSC_Files_Backup'      => 'includes/backup/class-ssc-files-backup.php',
-		'SSC_Manifest'          => 'includes/backup/class-ssc-manifest.php',
-		'SSC_Zip_Writer'        => 'includes/backup/class-ssc-zip-writer.php',
-		// Core
-		'SSC_Activator'         => 'includes/class-ssc-activator.php',
-		'SSC_Capabilities'      => 'includes/class-ssc-capabilities.php',
-		'SSC_Deactivator'       => 'includes/class-ssc-deactivator.php',
-		'SSC_Filesystem'        => 'includes/class-ssc-filesystem.php',
-		'SSC_Logger'            => 'includes/class-ssc-logger.php',
-		'SSC_Plugin'            => 'includes/class-ssc-plugin.php',
-		'SSC_Security'          => 'includes/class-ssc-security.php',
-		// Cron
-		'SSC_Scheduler'         => 'includes/cron/class-ssc-scheduler.php',
-		// Restore
-		'SSC_Database_Restore'  => 'includes/restore/class-ssc-database-restore.php',
-		'SSC_Files_Restore'     => 'includes/restore/class-ssc-files-restore.php',
-		'SSC_Restore_Manager'   => 'includes/restore/class-ssc-restore-manager.php',
-		'SSC_Self_Updater'      => 'includes/restore/class-ssc-self-updater.php',
-		'SSC_URL_Rewriter'      => 'includes/restore/class-ssc-url-rewriter.php',
-	);
-
-	if ( isset( $class_map[ $class_name ] ) ) {
-		$file = SSC_PLUGIN_DIR . $class_map[ $class_name ];
-		if ( file_exists( $file ) ) {
-			require_once $file;
-		}
-	}
-}
-spl_autoload_register( 'ssc_autoloader' );
-
-// ── Hooks de ciclo de vida ────────────────────────────────────────────────────
-register_activation_hook( SSC_PLUGIN_FILE, array( 'SSC_Activator', 'activate' ) );
-register_deactivation_hook( SSC_PLUGIN_FILE, array( 'SSC_Deactivator', 'deactivate' ) );
-
-// ── Arranque del plugin ───────────────────────────────────────────────────────
-add_action( 'plugins_loaded', function () {
-	SSC_Plugin::get_instance();
-} );
+add_action('plugins_loaded', static function (): void {
+    \SuperSheepCopy\Plugin::instance()->boot();
+});
