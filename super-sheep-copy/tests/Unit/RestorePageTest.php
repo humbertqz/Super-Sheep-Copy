@@ -83,6 +83,9 @@ final class RestorePageTest extends TestCase
         self::assertStringContainsString('Delete', $html);
         self::assertStringNotContainsString('disabled', $html);
         self::assertStringContainsString('class="super-sheep-copy-header"', $html);
+        self::assertTextBefore($html, '<h1 class="super-sheep-copy-screen-title">Super Sheep Copy Restore</h1>', 'class="super-sheep-copy-header"');
+        self::assertHeaderDoesNotContain($html, '<h1>Super Sheep Copy Restore</h1>');
+        self::assertHeaderContains($html, 'class="super-sheep-copy-header-title">Super Sheep Copy Restore</span>');
         self::assertStringContainsString('assets/images/super-sheep-copy-logo.png', $html);
         self::assertStringContainsString('alt="Super Sheep Copy"', $html);
         self::assertStringContainsString('Site Restore Workflow', $html);
@@ -423,6 +426,30 @@ final class RestorePageTest extends TestCase
         self::assertNotFalse($firstPosition, 'Missing text: ' . $first);
         self::assertNotFalse($secondPosition, 'Missing text: ' . $second);
         self::assertLessThan($secondPosition, $firstPosition, sprintf('Expected "%s" before "%s".', $first, $second));
+    }
+
+    private static function assertHeaderDoesNotContain(string $html, string $needle): void
+    {
+        $headerPosition = strpos($html, 'class="super-sheep-copy-header"');
+        self::assertNotFalse($headerPosition, 'Header was not found in HTML.');
+
+        $headerEnd = strpos($html, '</div>', $headerPosition);
+        self::assertNotFalse($headerEnd, 'Header end was not found in HTML.');
+
+        $headerHtml = substr($html, $headerPosition, $headerEnd - $headerPosition);
+        self::assertStringNotContainsString($needle, $headerHtml);
+    }
+
+    private static function assertHeaderContains(string $html, string $needle): void
+    {
+        $headerPosition = strpos($html, 'class="super-sheep-copy-header"');
+        self::assertNotFalse($headerPosition, 'Header was not found in HTML.');
+
+        $headerEnd = strpos($html, '</div>', $headerPosition);
+        self::assertNotFalse($headerEnd, 'Header end was not found in HTML.');
+
+        $headerHtml = substr($html, $headerPosition, $headerEnd - $headerPosition);
+        self::assertStringContainsString($needle, $headerHtml);
     }
 
     private function restoreDirectory(): string

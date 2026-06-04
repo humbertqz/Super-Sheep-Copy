@@ -44,10 +44,26 @@ final class SettingsPageTest extends TestCase
 
         self::assertStringContainsString('Backup storage', $html);
         self::assertStringContainsString('class="super-sheep-copy-header"', $html);
+        self::assertTextBefore($html, '<h1 class="super-sheep-copy-screen-title">Super Sheep Copy Settings</h1>', 'class="super-sheep-copy-header"');
+        self::assertHeaderDoesNotContain($html, '<h1>Super Sheep Copy Settings</h1>');
+        self::assertHeaderContains($html, 'class="super-sheep-copy-header-title">Super Sheep Copy Settings</span>');
         self::assertStringContainsString('assets/images/super-sheep-copy-logo.png', $html);
         self::assertStringContainsString('alt="Super Sheep Copy"', $html);
         self::assertStringNotContainsString('Runtime dependencies', $html);
         self::assertStringNotContainsString('Composer autoloading with no runtime packages.', $html);
+    }
+
+    public function testRenderPlacesSettingsNoticeBeforePluginHeader(): void
+    {
+        $_GET['super_sheep_copy_status'] = 'settings_saved';
+        $page = new SettingsPage(new Capability(), new Nonce(), new BackupSettingsRepository());
+
+        ob_start();
+        $page->render();
+        $html = (string) ob_get_clean();
+
+        self::assertTextBefore($html, 'Settings saved.', 'class="super-sheep-copy-header"');
+        self::assertTextBefore($html, 'Settings saved.', 'class="wrap super-sheep-copy"');
     }
 
     public function testRenderShowsNormalUserSettingsSections(): void
@@ -175,6 +191,40 @@ final class SettingsPageTest extends TestCase
         self::assertIsString($sent_report);
         self::assertStringContainsString('Super Sheep Copy Diagnostics', $sent_report);
         self::assertArrayNotHasKey(BackupSettingsRepository::OPTION_NAME, $GLOBALS['ssc_test_options']);
+    }
+
+    private static function assertTextBefore(string $html, string $first, string $second): void
+    {
+        $firstPosition = strpos($html, $first);
+        $secondPosition = strpos($html, $second);
+
+        self::assertNotFalse($firstPosition, 'Missing text: ' . $first);
+        self::assertNotFalse($secondPosition, 'Missing text: ' . $second);
+        self::assertLessThan($secondPosition, $firstPosition, sprintf('Expected "%s" before "%s".', $first, $second));
+    }
+
+    private static function assertHeaderDoesNotContain(string $html, string $needle): void
+    {
+        $headerPosition = strpos($html, 'class="super-sheep-copy-header"');
+        self::assertNotFalse($headerPosition, 'Header was not found in HTML.');
+
+        $headerEnd = strpos($html, '</div>', $headerPosition);
+        self::assertNotFalse($headerEnd, 'Header end was not found in HTML.');
+
+        $headerHtml = substr($html, $headerPosition, $headerEnd - $headerPosition);
+        self::assertStringNotContainsString($needle, $headerHtml);
+    }
+
+    private static function assertHeaderContains(string $html, string $needle): void
+    {
+        $headerPosition = strpos($html, 'class="super-sheep-copy-header"');
+        self::assertNotFalse($headerPosition, 'Header was not found in HTML.');
+
+        $headerEnd = strpos($html, '</div>', $headerPosition);
+        self::assertNotFalse($headerEnd, 'Header end was not found in HTML.');
+
+        $headerHtml = substr($html, $headerPosition, $headerEnd - $headerPosition);
+        self::assertStringContainsString($needle, $headerHtml);
     }
 
     private function removeDirectory(string $path): void

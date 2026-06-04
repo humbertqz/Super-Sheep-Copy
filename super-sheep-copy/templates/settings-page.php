@@ -2,30 +2,29 @@
 // phpcs:disable WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedVariableFound -- Template variables are local to included view scope.
 defined('ABSPATH') || exit;
 ?>
+<?php if ($status === 'settings_saved') : ?>
+    <div class="super-sheep-copy-admin-notice super-sheep-copy-admin-notice-success">
+        <p><?php echo esc_html__('Settings saved.', 'super-sheep-copy'); ?></p>
+    </div>
+<?php elseif ($status === 'settings_failed') : ?>
+    <div class="super-sheep-copy-admin-notice super-sheep-copy-admin-notice-error">
+        <p><?php echo esc_html__('Settings could not be saved.', 'super-sheep-copy'); ?></p>
+    </div>
+<?php elseif ($status === 'failed_jobs_cleaned') : ?>
+    <div class="super-sheep-copy-admin-notice super-sheep-copy-admin-notice-success">
+        <p><?php echo esc_html__('Failed backup files cleaned.', 'super-sheep-copy'); ?></p>
+    </div>
+<?php elseif ($status === 'failed_jobs_cleanup_failed') : ?>
+    <div class="super-sheep-copy-admin-notice super-sheep-copy-admin-notice-error">
+        <p><?php echo esc_html__('Failed backup files could not be cleaned.', 'super-sheep-copy'); ?></p>
+    </div>
+<?php endif; ?>
 <div class="wrap super-sheep-copy">
     <?php
     $page_title = __('Super Sheep Copy Settings', 'super-sheep-copy');
     $page_subtitle = __('Review plugin paths and backup configuration.', 'super-sheep-copy');
     include SUPER_SHEEP_COPY_DIR . 'templates/partials/header.php';
     ?>
-
-    <?php if ($status === 'settings_saved') : ?>
-        <div class="super-sheep-copy-admin-notice super-sheep-copy-admin-notice-success">
-            <p><?php echo esc_html__('Settings saved.', 'super-sheep-copy'); ?></p>
-        </div>
-    <?php elseif ($status === 'settings_failed') : ?>
-        <div class="super-sheep-copy-admin-notice super-sheep-copy-admin-notice-error">
-            <p><?php echo esc_html__('Settings could not be saved.', 'super-sheep-copy'); ?></p>
-        </div>
-    <?php elseif ($status === 'failed_jobs_cleaned') : ?>
-        <div class="super-sheep-copy-admin-notice super-sheep-copy-admin-notice-success">
-            <p><?php echo esc_html__('Failed backup files cleaned.', 'super-sheep-copy'); ?></p>
-        </div>
-    <?php elseif ($status === 'failed_jobs_cleanup_failed') : ?>
-        <div class="super-sheep-copy-admin-notice super-sheep-copy-admin-notice-error">
-            <p><?php echo esc_html__('Failed backup files could not be cleaned.', 'super-sheep-copy'); ?></p>
-        </div>
-    <?php endif; ?>
 
     <form method="post">
         <?php echo $nonce_field; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
