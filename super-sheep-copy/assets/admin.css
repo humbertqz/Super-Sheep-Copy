@@ -335,18 +335,17 @@
 }
 
 .super-sheep-copy .super-sheep-copy-backup-block-primary {
-  align-items: center;
+  align-items: stretch;
   border-left: 5px solid #2271b1;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 18px;
-  justify-content: space-between;
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
 }
 
 .super-sheep-copy .super-sheep-copy-backup-block h2 {
   font-size: 20px;
   line-height: 1.3;
-  margin: 0 0 6px;
+  margin: 0 0 4px;
 }
 
 .super-sheep-copy .super-sheep-copy-backup-block h3 {
@@ -358,6 +357,21 @@
 .super-sheep-copy .super-sheep-copy-backup-block p {
   color: #50575e;
   margin: 0;
+}
+
+.super-sheep-copy .super-sheep-copy-backup-main {
+  align-items: center;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.super-sheep-copy .super-sheep-copy-backup-copy {
+  min-width: 0;
+}
+
+.super-sheep-copy .super-sheep-copy-backup-copy p {
+  max-width: 620px;
 }
 
 .super-sheep-copy .super-sheep-copy-backup-block-header {
@@ -378,19 +392,36 @@
   margin: 0;
 }
 
+.super-sheep-copy .super-sheep-copy-settings-summary-compact {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+}
+
+.super-sheep-copy .super-sheep-copy-settings-summary-compact li {
+  background: #f6f7f7;
+  border: 1px solid #dcdcde;
+  border-radius: 999px;
+  color: #3c434a;
+  font-size: 12px;
+  line-height: 1.35;
+  list-style: none;
+  padding: 3px 8px;
+}
+
 .super-sheep-copy .super-sheep-copy-backup-safety {
   background: #fff8e5;
   border: 1px solid #f0c36d;
   border-left: 4px solid #dba617;
-  flex: 1 0 100%;
-  margin-top: 2px;
-  padding: 10px 12px;
+  padding: 7px 10px;
 }
 
 .super-sheep-copy .super-sheep-copy-backup-safety p {
   color: #3c434a;
-  font-size: 13px;
-  line-height: 1.45;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .super-sheep-copy .super-sheep-copy-current-progress {
@@ -660,7 +691,7 @@
     width: 100%;
   }
 
-  .super-sheep-copy .super-sheep-copy-backup-block-primary,
+  .super-sheep-copy .super-sheep-copy-backup-main,
   .super-sheep-copy .super-sheep-copy-backup-action,
   .super-sheep-copy .super-sheep-copy-backup-action .button {
     align-items: stretch;

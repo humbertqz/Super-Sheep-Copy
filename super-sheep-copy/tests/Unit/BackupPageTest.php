@@ -70,6 +70,9 @@ final class BackupPageTest extends TestCase
         self::assertHeaderContains($html, 'class="super-sheep-copy-header-title">Super Sheep Copy Backup</span>');
         self::assertStringContainsString('assets/images/super-sheep-copy-logo.png', $html);
         self::assertStringContainsString('alt="Super Sheep Copy"', $html);
+        self::assertStringContainsString('class="super-sheep-copy-backup-main"', $html);
+        self::assertStringContainsString('class="super-sheep-copy-backup-copy"', $html);
+        self::assertStringContainsString('class="super-sheep-copy-settings-summary super-sheep-copy-settings-summary-compact"', $html);
         self::assertTextBefore($html, 'class="super-sheep-copy-backup-action"', 'Backups contain sensitive site data');
         self::assertTextBefore($html, 'Backups contain sensitive site data', '<h2>Current Backup</h2>');
         self::assertStringContainsString('class="super-sheep-copy-backup-safety"', $html);

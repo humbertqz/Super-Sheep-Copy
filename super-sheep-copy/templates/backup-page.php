@@ -52,22 +52,24 @@ foreach ($jobs as $job) {
 
     <div class="super-sheep-copy-backup-dashboard">
         <section class="super-sheep-copy-backup-block super-sheep-copy-backup-block-primary">
-            <div>
-                <h2><?php echo esc_html__('Create Backup', 'super-sheep-copy'); ?></h2>
-                <p><?php echo esc_html__('Create a full-site package. The backup runs in small background steps so the admin request stays responsive.', 'super-sheep-copy'); ?></p>
+            <div class="super-sheep-copy-backup-main">
+                <div class="super-sheep-copy-backup-copy">
+                    <h2><?php echo esc_html__('Create Backup', 'super-sheep-copy'); ?></h2>
+                    <p><?php echo esc_html__('Create a full-site package. The backup runs in small background steps so the admin request stays responsive.', 'super-sheep-copy'); ?></p>
+                </div>
+                <form class="super-sheep-copy-backup-action" method="post">
+                    <?php echo $nonce_field; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
+                    <input type="hidden" name="super_sheep_copy_action" value="create_backup" />
+                    <button class="button button-primary" type="submit"><?php echo esc_html__('Create Backup', 'super-sheep-copy'); ?></button>
+                </form>
             </div>
             <?php if ($backup_settings_summary !== array()) : ?>
-                <ul class="super-sheep-copy-settings-summary">
+                <ul class="super-sheep-copy-settings-summary super-sheep-copy-settings-summary-compact">
                     <?php foreach ($backup_settings_summary as $summary_item) : ?>
                         <li><?php echo esc_html($summary_item); ?></li>
                     <?php endforeach; ?>
                 </ul>
             <?php endif; ?>
-            <form class="super-sheep-copy-backup-action" method="post">
-                <?php echo $nonce_field; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
-                <input type="hidden" name="super_sheep_copy_action" value="create_backup" />
-                <button class="button button-primary" type="submit"><?php echo esc_html__('Create Backup', 'super-sheep-copy'); ?></button>
-            </form>
             <div class="super-sheep-copy-backup-safety">
                 <p><?php echo esc_html__('Backups contain sensitive site data including users, password hashes, orders, API keys, and private content. Store backup files securely.', 'super-sheep-copy'); ?></p>
             </div>
