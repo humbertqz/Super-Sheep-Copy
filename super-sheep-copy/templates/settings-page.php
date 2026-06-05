@@ -125,4 +125,6 @@ defined('ABSPATH') || exit;
         <input type="hidden" name="super_sheep_copy_action" value="clean_failed_jobs" />
         <button class="button" type="submit"><?php echo esc_html__('Clean failed backup files', 'super-sheep-copy'); ?></button>
     </form>
+
+    <?php include SUPER_SHEEP_COPY_DIR . 'templates/partials/footer.php'; ?>
 </div>

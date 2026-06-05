@@ -49,6 +49,10 @@ final class SettingsPageTest extends TestCase
         self::assertHeaderContains($html, 'class="super-sheep-copy-header-title">Super Sheep Copy Settings</span>');
         self::assertStringContainsString('assets/images/super-sheep-copy-logo.png', $html);
         self::assertStringContainsString('alt="Super Sheep Copy"', $html);
+        self::assertStringContainsString('class="super-sheep-copy-footer"', $html);
+        self::assertStringContainsString('Version 0.1.0', $html);
+        self::assertStringContainsString('href="https://github.com/humbertqz/Super-Sheep-Copy"', $html);
+        self::assertTextBefore($html, 'class="super-sheep-copy-header"', 'class="super-sheep-copy-footer"');
         self::assertStringNotContainsString('Runtime dependencies', $html);
         self::assertStringNotContainsString('Composer autoloading with no runtime packages.', $html);
     }

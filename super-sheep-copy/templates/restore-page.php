@@ -223,4 +223,6 @@ defined('ABSPATH') || exit;
             </table>
         </details>
     </div>
+
+    <?php include SUPER_SHEEP_COPY_DIR . 'templates/partials/footer.php'; ?>
 </div>

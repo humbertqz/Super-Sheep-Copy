@@ -70,10 +70,15 @@ final class BackupPageTest extends TestCase
         self::assertHeaderContains($html, 'class="super-sheep-copy-header-title">Super Sheep Copy Backup</span>');
         self::assertStringContainsString('assets/images/super-sheep-copy-logo.png', $html);
         self::assertStringContainsString('alt="Super Sheep Copy"', $html);
-        self::assertTextBefore($html, 'Backups contain sensitive site data', 'class="super-sheep-copy-header"');
-        self::assertTextBefore($html, 'Backups contain sensitive site data', 'class="wrap super-sheep-copy"');
-        self::assertStringContainsString('class="super-sheep-copy-admin-notice super-sheep-copy-admin-notice-warning"', $html);
+        self::assertTextBefore($html, 'class="super-sheep-copy-backup-action"', 'Backups contain sensitive site data');
+        self::assertTextBefore($html, 'Backups contain sensitive site data', '<h2>Current Backup</h2>');
+        self::assertStringContainsString('class="super-sheep-copy-backup-safety"', $html);
+        self::assertStringNotContainsString('class="super-sheep-copy-admin-notice super-sheep-copy-admin-notice-warning"', $html);
         self::assertStringNotContainsString('class="notice notice-warning"', $html);
+        self::assertStringContainsString('class="super-sheep-copy-footer"', $html);
+        self::assertStringContainsString('Version 0.1.0', $html);
+        self::assertStringContainsString('href="https://github.com/humbertqz/Super-Sheep-Copy"', $html);
+        self::assertTextBefore($html, 'class="super-sheep-copy-header"', 'class="super-sheep-copy-footer"');
     }
 
     public function testRenderShowsBackupSettingsSummary(): void

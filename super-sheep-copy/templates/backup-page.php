@@ -28,9 +28,6 @@ foreach ($jobs as $job) {
     }
 }
 ?>
-<div class="super-sheep-copy-admin-notice super-sheep-copy-admin-notice-warning">
-    <p><?php echo esc_html__('Backups contain sensitive site data including users, password hashes, orders, API keys, and private content. Store backup files securely.', 'super-sheep-copy'); ?></p>
-</div>
 <?php if ($status === 'backup_queued') : ?>
     <div class="super-sheep-copy-admin-notice super-sheep-copy-admin-notice-success">
         <p><?php echo esc_html__('Backup queued. Keep this page open while background steps finish.', 'super-sheep-copy'); ?></p>
@@ -71,6 +68,9 @@ foreach ($jobs as $job) {
                 <input type="hidden" name="super_sheep_copy_action" value="create_backup" />
                 <button class="button button-primary" type="submit"><?php echo esc_html__('Create Backup', 'super-sheep-copy'); ?></button>
             </form>
+            <div class="super-sheep-copy-backup-safety">
+                <p><?php echo esc_html__('Backups contain sensitive site data including users, password hashes, orders, API keys, and private content. Store backup files securely.', 'super-sheep-copy'); ?></p>
+            </div>
         </section>
 
         <section class="super-sheep-copy-backup-block">
@@ -251,4 +251,5 @@ foreach ($jobs as $job) {
         <?php endif; ?>
     </div>
 
+    <?php include SUPER_SHEEP_COPY_DIR . 'templates/partials/footer.php'; ?>
 </div>
