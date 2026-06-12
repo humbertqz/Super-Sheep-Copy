@@ -45,7 +45,7 @@ final class WpConfigReader
     }
 
     /**
-     * @return array{readable:bool,complete:bool,name:string,user:string,password:string,host:string,port:int,socket:string,charset:string,table_prefix:string}
+     * @return array{readable:bool,complete:bool,name:string,user:string,password:string,host:string,port:int,socket:string,charset:string,collate:string,table_prefix:string}
      */
     public function readDatabaseCredentials(string $wordpress_root): array
     {
@@ -59,6 +59,7 @@ final class WpConfigReader
             'port' => 0,
             'socket' => '',
             'charset' => '',
+            'collate' => '',
             'table_prefix' => '',
         );
 
@@ -83,6 +84,7 @@ final class WpConfigReader
             'port' => $host_parts['port'],
             'socket' => $host_parts['socket'],
             'charset' => $this->definedValue($contents, 'DB_CHARSET') ?? '',
+            'collate' => $this->definedValue($contents, 'DB_COLLATE') ?? '',
             'table_prefix' => $this->tablePrefix($contents),
         );
         $credentials['complete'] = $credentials['name'] !== ''

@@ -43,7 +43,12 @@ final class DatabaseImportManifestReaderTest extends TestCase
         $this->writeArchive(array(
             'format_version' => '1',
             'table_count' => 1,
-            'tables' => array(array('name' => 'wp_posts', 'chunks' => array('wp_posts.part001.sql'))),
+            'tables' => array(array(
+                'name' => 'wp_posts',
+                'charset' => 'latin1',
+                'collation' => 'latin1_swedish_ci',
+                'chunks' => array('wp_posts.part001.sql'),
+            )),
         ), array('wp_posts.part001.sql' => 'CREATE TABLE `wp_posts` (`ID` bigint);'));
 
         $result = (new \SuperSheepCopyInstaller\DatabaseImportManifestReader())->read($this->archive);
@@ -51,6 +56,8 @@ final class DatabaseImportManifestReaderTest extends TestCase
         self::assertTrue($result['valid']);
         self::assertSame(array(), $result['warnings']);
         self::assertSame('wp_posts', $result['tables'][0]['name']);
+        self::assertSame('latin1', $result['tables'][0]['charset']);
+        self::assertSame('latin1_swedish_ci', $result['tables'][0]['collation']);
         self::assertSame(array('wp_posts.part001.sql'), $result['tables'][0]['chunks']);
         self::assertSame('CREATE TABLE `wp_posts` (`ID` bigint);', $result['chunks']['wp_posts.part001.sql']);
     }

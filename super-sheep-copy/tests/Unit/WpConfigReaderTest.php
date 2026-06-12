@@ -68,6 +68,7 @@ final class WpConfigReaderTest extends TestCase
             . "define('DB_PASSWORD', 'secret');\n"
             . "define('DB_HOST', 'localhost:3307');\n"
             . "define('DB_CHARSET', 'utf8mb4');\n"
+            . "define('DB_COLLATE', 'utf8mb4_unicode_ci');\n"
             . "\$table_prefix = 'wp_';\n");
 
         $reader = new \SuperSheepCopyInstaller\WpConfigReader();
@@ -83,10 +84,28 @@ final class WpConfigReaderTest extends TestCase
         self::assertSame(3307, $credentials['port']);
         self::assertSame('', $credentials['socket']);
         self::assertSame('utf8mb4', $credentials['charset']);
+        self::assertSame('utf8mb4_unicode_ci', $credentials['collate']);
         self::assertSame('wp_', $credentials['table_prefix']);
 
         self::assertArrayNotHasKey('password', $summary);
         self::assertStringNotContainsString('secret', json_encode($summary) ?: '');
+    }
+
+    public function testReadsEmptyDatabaseCollationAsEmptyString(): void
+    {
+        file_put_contents($this->root . '/wp-config.php', "<?php\n"
+            . "define('DB_NAME', 'wordpress');\n"
+            . "define('DB_USER', 'dbuser');\n"
+            . "define('DB_PASSWORD', 'secret');\n"
+            . "define('DB_HOST', 'localhost');\n"
+            . "define('DB_CHARSET', 'utf8mb4');\n"
+            . "define('DB_COLLATE', '');\n");
+
+        $credentials = (new \SuperSheepCopyInstaller\WpConfigReader())->readDatabaseCredentials($this->root);
+
+        self::assertTrue($credentials['complete']);
+        self::assertSame('utf8mb4', $credentials['charset']);
+        self::assertSame('', $credentials['collate']);
     }
 
     public function testReadsParentDirectoryWpConfig(): void

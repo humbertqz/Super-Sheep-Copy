@@ -97,6 +97,85 @@ final class DatabaseChunkImporterTest extends TestCase
         self::assertTrue($connection->closed);
     }
 
+    public function testNormalizesCreateTableCharsetAndCollationToDestination(): void
+    {
+        $connection = new DatabaseChunkImporterFakeConnection();
+        $importer = new class($connection) extends \SuperSheepCopyInstaller\DatabaseChunkImporter {
+            private DatabaseChunkImporterFakeConnection $connection;
+
+            public function __construct(DatabaseChunkImporterFakeConnection $connection)
+            {
+                $this->connection = $connection;
+            }
+
+            protected function connect(array $credentials)
+            {
+                return $this->connection;
+            }
+        };
+
+        $result = $importer->import(
+            array('host' => 'localhost', 'user' => 'root', 'password' => '', 'name' => 'wordpress', 'charset' => 'utf8mb4', 'collate' => 'utf8mb4_unicode_ci'),
+            array(array(
+                'name' => 'wp_posts',
+                'charset' => 'latin1',
+                'collation' => 'latin1_swedish_ci',
+                'chunks' => array('wp_posts.part001.sql'),
+            )),
+            array(
+                'wp_posts.part001.sql' => "DROP TABLE IF EXISTS `wp_posts`;\n"
+                    . "CREATE TABLE `wp_posts` (`post_title` varchar(191) CHARACTER SET latin1 COLLATE latin1_swedish_ci) DEFAULT CHARSET=latin1 COLLATE=latin1_swedish_ci;\n"
+                    . "INSERT INTO `wp_posts` (`post_title`) VALUES ('latin1_swedish_ci should stay inside values');",
+            ),
+            array('wp_posts' => 'ssc_tmp_hash_wp_posts'),
+            new \SuperSheepCopyInstaller\SqlTableNameRewriter()
+        );
+
+        self::assertTrue($result['imported']);
+        self::assertSame(
+            'CREATE TABLE `ssc_tmp_hash_wp_posts` (`post_title` varchar(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci',
+            $connection->statements[1]
+        );
+        self::assertSame(
+            "INSERT INTO `ssc_tmp_hash_wp_posts` (`post_title`) VALUES ('latin1_swedish_ci should stay inside values')",
+            $connection->statements[2]
+        );
+    }
+
+    public function testRemovesSourceCollationWhenDestinationCollationIsEmpty(): void
+    {
+        $connection = new DatabaseChunkImporterFakeConnection();
+        $importer = new class($connection) extends \SuperSheepCopyInstaller\DatabaseChunkImporter {
+            private DatabaseChunkImporterFakeConnection $connection;
+
+            public function __construct(DatabaseChunkImporterFakeConnection $connection)
+            {
+                $this->connection = $connection;
+            }
+
+            protected function connect(array $credentials)
+            {
+                return $this->connection;
+            }
+        };
+
+        $result = $importer->import(
+            array('host' => 'localhost', 'user' => 'root', 'password' => '', 'name' => 'wordpress', 'charset' => 'utf8mb4', 'collate' => ''),
+            array(array('name' => 'wp_posts', 'chunks' => array('wp_posts.part001.sql'))),
+            array(
+                'wp_posts.part001.sql' => 'CREATE TABLE `wp_posts` (`post_title` varchar(191) CHARACTER SET latin1 COLLATE latin1_swedish_ci) DEFAULT CHARSET=latin1 COLLATE=latin1_swedish_ci;',
+            ),
+            array('wp_posts' => 'ssc_tmp_hash_wp_posts'),
+            new \SuperSheepCopyInstaller\SqlTableNameRewriter()
+        );
+
+        self::assertTrue($result['imported']);
+        self::assertSame(
+            'CREATE TABLE `ssc_tmp_hash_wp_posts` (`post_title` varchar(191) CHARACTER SET utf8mb4) DEFAULT CHARSET=utf8mb4',
+            $connection->statements[0]
+        );
+    }
+
     public function testReportsFailedStatementDetailsWithoutCredentials(): void
     {
         $connection = new DatabaseChunkImporterFakeConnection();

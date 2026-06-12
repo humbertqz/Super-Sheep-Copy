@@ -11,7 +11,7 @@ class DatabaseChunkImporter
 {
     /**
      * @param array<string,mixed> $credentials
-     * @param list<array{name:string,chunks:list<string>}> $tables
+     * @param list<array{name:string,charset?:string,collation?:string,chunks:list<string>}> $tables
      * @param array<string,string> $chunks
      * @param array<string,string> $table_map
      * @return array{imported:bool,table_count:int,chunk_count:int,statement_count:int,warnings:list<string>}
@@ -43,6 +43,7 @@ class DatabaseChunkImporter
                 $sql = $rewriter->rewrite(isset($chunks[$chunk_name]) ? $chunks[$chunk_name] : '', $table_map);
 
                 foreach ($this->splitStatements($sql) as $statement) {
+                    $statement = $this->normalizeCreateTableEncoding($statement, $credentials);
                     $this->assertSafeStatement($statement, $allowed_tables);
                     if ($expected_staging_table !== '' && $this->createsTable($statement, $expected_staging_table)) {
                         $created_staging_table = true;
@@ -271,14 +272,60 @@ class DatabaseChunkImporter
      */
     private function setConnectionCharset(object $mysqli, array $credentials): void
     {
-        $charset = isset($credentials['charset']) && is_scalar($credentials['charset']) ? (string) $credentials['charset'] : '';
-        $charset = $charset !== '' ? $charset : 'utf8mb4';
-        if (preg_match('/^[A-Za-z0-9_]+$/', $charset) !== 1) {
-            $charset = 'utf8mb4';
-        }
+        $charset = $this->destinationCharset($credentials);
 
         if (method_exists($mysqli, 'set_charset')) {
             $mysqli->set_charset($charset);
         }
+    }
+
+    /**
+     * @param array<string,mixed> $credentials
+     */
+    private function normalizeCreateTableEncoding(string $statement, array $credentials): string
+    {
+        if (preg_match('/^\\s*CREATE\\s+TABLE\\b/i', $statement) !== 1) {
+            return $statement;
+        }
+
+        $charset = $this->destinationCharset($credentials);
+        $collation = $this->destinationCollation($credentials);
+
+        $statement = preg_replace('/\\b(?:DEFAULT\\s+)?(?:CHARSET|CHARACTER\\s+SET)\\s*=\\s*[A-Za-z0-9_]+/i', 'DEFAULT CHARSET=' . $charset, $statement);
+        $statement = preg_replace('/\\bCHARACTER\\s+SET\\s+[A-Za-z0-9_]+/i', 'CHARACTER SET ' . $charset, $statement);
+        $statement = $statement === null ? '' : $statement;
+
+        if ($collation !== '') {
+            $statement = preg_replace('/\\bCOLLATE\\s*=\\s*[A-Za-z0-9_]+/i', 'COLLATE=' . $collation, $statement);
+            $statement = preg_replace('/\\bCOLLATE\\s+[A-Za-z0-9_]+/i', 'COLLATE ' . $collation, $statement === null ? '' : $statement);
+
+            return $statement === null ? '' : $statement;
+        }
+
+        $statement = preg_replace('/\\s+COLLATE\\s*=\\s*[A-Za-z0-9_]+/i', '', $statement);
+        $statement = preg_replace('/\\s+COLLATE\\s+[A-Za-z0-9_]+/i', '', $statement === null ? '' : $statement);
+
+        return $statement === null ? '' : $statement;
+    }
+
+    /**
+     * @param array<string,mixed> $credentials
+     */
+    private function destinationCharset(array $credentials): string
+    {
+        $charset = isset($credentials['charset']) && is_scalar($credentials['charset']) ? (string) $credentials['charset'] : '';
+        $charset = $charset !== '' ? $charset : 'utf8mb4';
+
+        return preg_match('/^[A-Za-z0-9_]+$/', $charset) === 1 ? $charset : 'utf8mb4';
+    }
+
+    /**
+     * @param array<string,mixed> $credentials
+     */
+    private function destinationCollation(array $credentials): string
+    {
+        $collation = isset($credentials['collate']) && is_scalar($credentials['collate']) ? (string) $credentials['collate'] : '';
+
+        return preg_match('/^[A-Za-z0-9_]+$/', $collation) === 1 ? $collation : '';
     }
 }

@@ -7,7 +7,7 @@ namespace SuperSheepCopyInstaller;
 final class DatabaseImportManifestReader
 {
     /**
-     * @return array{valid:bool,tables:array<int,array{name:string,chunks:array<int,string>}>,chunks:array<string,string>,warnings:array<int,string>}
+     * @return array{valid:bool,tables:array<int,array{name:string,charset:string,collation:string,chunks:array<int,string>}>,chunks:array<string,string>,warnings:array<int,string>}
      */
     public function read(string $archive_path): array
     {
@@ -71,6 +71,8 @@ final class DatabaseImportManifestReader
 
             $tables[] = array(
                 'name' => $table['name'],
+                'charset' => isset($table['charset']) && is_string($table['charset']) ? $table['charset'] : '',
+                'collation' => isset($table['collation']) && is_string($table['collation']) ? $table['collation'] : '',
                 'chunks' => $table_chunks,
             );
         }
@@ -84,10 +86,10 @@ final class DatabaseImportManifestReader
     }
 
     /**
-     * @param array<int,array{name:string,chunks:array<int,string>}> $tables
+     * @param array<int,array{name:string,charset:string,collation:string,chunks:array<int,string>}> $tables
      * @param array<string,string> $chunks
      * @param array<int,string> $warnings
-     * @return array{valid:bool,tables:array<int,array{name:string,chunks:array<int,string>}>,chunks:array<string,string>,warnings:array<int,string>}
+     * @return array{valid:bool,tables:array<int,array{name:string,charset:string,collation:string,chunks:array<int,string>}>,chunks:array<string,string>,warnings:array<int,string>}
      */
     private function result(bool $valid, array $tables, array $chunks, array $warnings): array
     {
