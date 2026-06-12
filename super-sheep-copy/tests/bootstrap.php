@@ -61,6 +61,7 @@ $GLOBALS['ssc_test_is_multisite'] = false;
 $GLOBALS['ssc_test_stylesheet'] = 'twentytwentyfour';
 $GLOBALS['ssc_test_mu_plugins'] = array();
 $GLOBALS['ssc_test_deleted_files'] = array();
+$GLOBALS['ssc_test_scheduled_events'] = array();
 
 if (!function_exists('__')) {
     function __(string $text, string $domain = 'default'): string
@@ -297,6 +298,45 @@ if (!function_exists('wp_safe_redirect')) {
     {
         $GLOBALS['ssc_test_redirect'] = $location;
         return true;
+    }
+}
+
+if (!function_exists('wp_schedule_single_event')) {
+    function wp_schedule_single_event(int $timestamp, string $hook, array $args = array(), bool $wp_error = false): bool
+    {
+        $GLOBALS['ssc_test_scheduled_events'][$hook] = array(
+            'timestamp' => $timestamp,
+            'hook' => $hook,
+            'args' => $args,
+        );
+
+        return true;
+    }
+}
+
+if (!function_exists('wp_next_scheduled')) {
+    function wp_next_scheduled(string $hook, array $args = array())
+    {
+        unset($args);
+
+        return isset($GLOBALS['ssc_test_scheduled_events'][$hook]['timestamp'])
+            ? $GLOBALS['ssc_test_scheduled_events'][$hook]['timestamp']
+            : false;
+    }
+}
+
+if (!function_exists('wp_clear_scheduled_hook')) {
+    function wp_clear_scheduled_hook(string $hook, array $args = array(), bool $wp_error = false): int
+    {
+        unset($args, $wp_error);
+
+        if (!isset($GLOBALS['ssc_test_scheduled_events'][$hook])) {
+            return 0;
+        }
+
+        unset($GLOBALS['ssc_test_scheduled_events'][$hook]);
+
+        return 1;
     }
 }
 

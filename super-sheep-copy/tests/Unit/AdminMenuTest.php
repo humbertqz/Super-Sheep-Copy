@@ -69,6 +69,30 @@ final class AdminMenuTest extends TestCase
         self::assertIsArray($GLOBALS['ssc_test_actions']['load-toplevel_page_super-sheep-copy'][0]['callback']);
         self::assertSame('handleActions', $GLOBALS['ssc_test_actions']['load-toplevel_page_super-sheep-copy'][0]['callback'][1]);
     }
+
+    public function testDoesNotRegisterSeparateScheduleSubmenu(): void
+    {
+        $menu = new AdminMenu(
+            new Capability(),
+            new Nonce(),
+            new AdminMenuEnvironmentChecker(),
+            new AdminMenuJobRepository(),
+            new AdminMenuLogger(),
+            new AdminMenuBackupFactory(),
+            new AdminMenuMetadataCollector(),
+            new AdminMenuRestorePreparationManager(),
+            new AdminMenuInstallerPreparationManager()
+        );
+
+        $menu->addMenu();
+
+        $schedule_pages = array_values(array_filter($GLOBALS['ssc_test_submenu_pages'], static function (array $page): bool {
+            return $page['menu_slug'] === 'super-sheep-copy-schedule';
+        }));
+
+        self::assertSame(array(), $schedule_pages);
+        self::assertArrayNotHasKey('load-super-sheep-copy_page_super-sheep-copy-schedule', $GLOBALS['ssc_test_actions']);
+    }
 }
 
 final class AdminMenuEnvironmentChecker implements EnvironmentCheckerInterface

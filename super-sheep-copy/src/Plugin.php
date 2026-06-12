@@ -6,12 +6,26 @@ namespace SuperSheepCopy;
 
 use SuperSheepCopy\Admin\AdminMenu;
 use SuperSheepCopy\Backup\BackupManagerFactory;
+use SuperSheepCopy\Backup\BackupArchiveStepPackager;
 use SuperSheepCopy\Backup\BackupMetadataCollector;
+use SuperSheepCopy\Backup\BackupStepRunner;
+use SuperSheepCopy\Backup\FileScanner;
+use SuperSheepCopy\Backup\ManifestBuilder;
+use SuperSheepCopy\Backup\Database\ChunkPlanner;
+use SuperSheepCopy\Backup\Database\DatabaseExportManifestBuilder;
+use SuperSheepCopy\Backup\Database\SqlDumpFormatter;
+use SuperSheepCopy\Backup\Database\TableSelector;
+use SuperSheepCopy\Backup\Database\WpdbClient;
+use SuperSheepCopy\Backup\Database\WpdbDatabaseExporter;
 use SuperSheepCopy\Jobs\OptionJobRepository;
 use SuperSheepCopy\Restore\InstallerPreparationManager;
 use SuperSheepCopy\Restore\RestorePreparationManager;
+use SuperSheepCopy\Schedule\ScheduledBackupRunner;
+use SuperSheepCopy\Schedule\ScheduleEventScheduler;
+use SuperSheepCopy\Schedule\ScheduleSettingsRepository;
 use SuperSheepCopy\Security\Capability;
 use SuperSheepCopy\Security\Nonce;
+use SuperSheepCopy\Settings\BackupSettingsRepository;
 use SuperSheepCopy\Shared\Archive\ArchiveValidator;
 use SuperSheepCopy\Support\EnvironmentChecker;
 use SuperSheepCopy\Support\Filesystem;
@@ -38,7 +52,10 @@ final class Plugin
 
     public static function deactivate(): void
     {
-        // Intentionally no cleanup. Backup and job data are private user data.
+        if (function_exists('wp_clear_scheduled_hook')) {
+            wp_clear_scheduled_hook(ScheduleEventScheduler::DUE_HOOK);
+            wp_clear_scheduled_hook(ScheduleEventScheduler::CONTINUE_HOOK);
+        }
     }
 
     public function boot(): void
@@ -49,11 +66,24 @@ final class Plugin
 
         $this->booted = true;
 
-        if (is_admin()) {
-            global $wpdb;
+        global $wpdb;
 
-            $environment_checker = new EnvironmentChecker();
-            $jobs = new OptionJobRepository();
+        $environment_checker = new EnvironmentChecker();
+        $jobs = new OptionJobRepository();
+        $metadata_collector = new BackupMetadataCollector($environment_checker);
+
+        $scheduled_runner = new ScheduledBackupRunner(
+            $jobs,
+            new ScheduleSettingsRepository(),
+            new BackupSettingsRepository(),
+            $metadata_collector,
+            $this->backupStepRunner($jobs, $wpdb),
+            defined('ABSPATH') ? ABSPATH : '',
+            self::backupDirectory()
+        );
+        $scheduled_runner->register();
+
+        if (is_admin()) {
             $admin_menu = new AdminMenu(
                 new Capability(),
                 new Nonce(),
@@ -61,7 +91,7 @@ final class Plugin
                 $jobs,
                 new NullLogger(),
                 new BackupManagerFactory($jobs, $wpdb),
-                new BackupMetadataCollector($environment_checker),
+                $metadata_collector,
                 new RestorePreparationManager(
                     new ArchiveValidator(),
                     $jobs,
@@ -77,6 +107,23 @@ final class Plugin
             );
             $admin_menu->register();
         }
+    }
+
+    private function backupStepRunner(OptionJobRepository $jobs, $wpdb): BackupStepRunner
+    {
+        $wpdb_client = new WpdbClient($wpdb);
+        $database_exporter = new WpdbDatabaseExporter($wpdb_client, new TableSelector());
+        $packager = new BackupArchiveStepPackager(new ManifestBuilder(defined('SUPER_SHEEP_COPY_VERSION') ? SUPER_SHEEP_COPY_VERSION : '0.1.0', '1'));
+
+        return new BackupStepRunner(
+            $jobs,
+            $database_exporter,
+            new ChunkPlanner(),
+            new SqlDumpFormatter(),
+            new DatabaseExportManifestBuilder(),
+            new FileScanner(),
+            $packager
+        );
     }
 
     public static function backupDirectory(): string

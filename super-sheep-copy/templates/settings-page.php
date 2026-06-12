@@ -66,6 +66,54 @@ defined('ABSPATH') || exit;
         </div>
 
         <div class="super-sheep-copy-panel">
+            <h2><?php echo esc_html__('Automatic Backups', 'super-sheep-copy'); ?></h2>
+            <table class="form-table" role="presentation">
+                <tr>
+                    <th scope="row"><?php echo esc_html__('Schedule', 'super-sheep-copy'); ?></th>
+                    <td>
+                        <label>
+                            <input type="hidden" name="super_sheep_copy_schedule[enabled]" value="0" />
+                            <input type="checkbox" name="super_sheep_copy_schedule[enabled]" value="1" <?php checked($schedule_settings->enabled()); ?> />
+                            <?php echo esc_html__('Enable scheduled backups', 'super-sheep-copy'); ?>
+                        </label>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><?php echo esc_html__('Frequency', 'super-sheep-copy'); ?></th>
+                    <td>
+                        <select name="super_sheep_copy_schedule[frequency]">
+                            <option value="daily"<?php echo $schedule_settings->frequency() === 'daily' ? ' selected' : ''; ?>><?php echo esc_html__('Daily', 'super-sheep-copy'); ?></option>
+                            <option value="weekly"<?php echo $schedule_settings->frequency() === 'weekly' ? ' selected' : ''; ?>><?php echo esc_html__('Weekly', 'super-sheep-copy'); ?></option>
+                            <option value="monthly"<?php echo $schedule_settings->frequency() === 'monthly' ? ' selected' : ''; ?>><?php echo esc_html__('Monthly', 'super-sheep-copy'); ?></option>
+                        </select>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><?php echo esc_html__('Time', 'super-sheep-copy'); ?></th>
+                    <td>
+                        <input type="time" name="super_sheep_copy_schedule[time_of_day]" value="<?php echo esc_attr($schedule_settings->timeOfDay()); ?>" />
+                        <p class="description"><?php echo esc_html__('Weekly backups run on Monday. Monthly backups run on the 1st.', 'super-sheep-copy'); ?></p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><?php echo esc_html__('Next run', 'super-sheep-copy'); ?></th>
+                    <td><?php echo esc_html($next_run_label); ?></td>
+                </tr>
+                <tr>
+                    <th scope="row"><?php echo esc_html__('Last scheduled run', 'super-sheep-copy'); ?></th>
+                    <td>
+                        <?php
+                        $last_schedule_run = $schedule_settings->lastStatus() !== ''
+                            ? $schedule_settings->lastStatus() . ': ' . $schedule_settings->lastMessage()
+                            : __('No scheduled backup has run yet.', 'super-sheep-copy');
+                        echo esc_html($last_schedule_run);
+                        ?>
+                    </td>
+                </tr>
+            </table>
+        </div>
+
+        <div class="super-sheep-copy-panel">
             <h2><?php echo esc_html__('Storage & Cleanup', 'super-sheep-copy'); ?></h2>
             <table class="form-table" role="presentation">
                 <tr>
