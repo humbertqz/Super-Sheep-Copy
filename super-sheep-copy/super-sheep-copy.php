@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Super Sheep Copy
  * Description: Full-site backup and restore tooling scaffold.
- * Version: 0.1.0
+ * Version: 0.1.1
  * Author: Humberto Quezada
  * License: GPLv3 or later
  * License URI: https://www.gnu.org/licenses/gpl-3.0.html
@@ -34,7 +34,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('SUPER_SHEEP_COPY_VERSION', '0.1.0');
+define('SUPER_SHEEP_COPY_VERSION', '0.1.1');
 define('SUPER_SHEEP_COPY_FILE', __FILE__);
 define('SUPER_SHEEP_COPY_DIR', plugin_dir_path(__FILE__));
 define('SUPER_SHEEP_COPY_URL', plugin_dir_url(__FILE__));

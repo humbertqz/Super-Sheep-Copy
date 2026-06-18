@@ -46,7 +46,7 @@ final class BackupManagerFactory implements BackupManagerFactoryInterface
 
         $packager = new BackupArchivePackager(
             new ArchiveWriter(),
-            new ManifestBuilder(defined('SUPER_SHEEP_COPY_VERSION') ? SUPER_SHEEP_COPY_VERSION : '0.1.0', '1'),
+            new ManifestBuilder(defined('SUPER_SHEEP_COPY_VERSION') ? SUPER_SHEEP_COPY_VERSION : '0.1.1', '1'),
             new PackageWriterFactory()
         );
 

@@ -53,7 +53,7 @@ final class SettingsPageTest extends TestCase
         self::assertStringContainsString('assets/images/super-sheep-copy-logo.png', $html);
         self::assertStringContainsString('alt="Super Sheep Copy"', $html);
         self::assertStringContainsString('class="super-sheep-copy-footer"', $html);
-        self::assertStringContainsString('Version 0.1.0', $html);
+        self::assertStringContainsString('Version 0.1.1', $html);
         self::assertStringContainsString('href="https://github.com/humbertqz/Super-Sheep-Copy"', $html);
         self::assertTextBefore($html, 'class="super-sheep-copy-header"', 'class="super-sheep-copy-footer"');
         self::assertStringNotContainsString('Runtime dependencies', $html);
@@ -110,6 +110,30 @@ final class SettingsPageTest extends TestCase
         self::assertStringContainsString('value="03:30"', $html);
         self::assertStringContainsString('Next run', $html);
         self::assertStringContainsString('No scheduled backup has run yet.', $html);
+        self::assertStringContainsString(
+            'Scheduled backups use WP-Cron and may run late on sites with little traffic.',
+            $html
+        );
+    }
+
+    /**
+     * @runInSeparateProcess
+     * @preserveGlobalState disabled
+     */
+    public function testRenderShowsServerCronWarningWhenWpCronIsDisabled(): void
+    {
+        define('DISABLE_WP_CRON', true);
+
+        $page = new SettingsPage(new Capability(), new Nonce(), new BackupSettingsRepository());
+
+        ob_start();
+        $page->render();
+        $html = (string) ob_get_clean();
+
+        self::assertStringContainsString(
+            'WP-Cron is disabled. Scheduled backups require a server cron job that calls wp-cron.php.',
+            $html
+        );
     }
 
     public function testRenderShowsLastBackupSummaryAndDiagnosticsButton(): void

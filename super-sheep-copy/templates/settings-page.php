@@ -76,6 +76,14 @@ defined('ABSPATH') || exit;
                             <input type="checkbox" name="super_sheep_copy_schedule[enabled]" value="1" <?php checked($schedule_settings->enabled()); ?> />
                             <?php echo esc_html__('Enable scheduled backups', 'super-sheep-copy'); ?>
                         </label>
+                        <p class="description">
+                            <?php echo esc_html__('Scheduled backups use WP-Cron and may run late on sites with little traffic. For reliable timing, configure a server cron job to call wp-cron.php regularly.', 'super-sheep-copy'); ?>
+                        </p>
+                        <?php if (defined('DISABLE_WP_CRON') && DISABLE_WP_CRON) : ?>
+                            <div class="notice notice-warning inline">
+                                <p><?php echo esc_html__('WP-Cron is disabled. Scheduled backups require a server cron job that calls wp-cron.php.', 'super-sheep-copy'); ?></p>
+                            </div>
+                        <?php endif; ?>
                     </td>
                 </tr>
                 <tr>

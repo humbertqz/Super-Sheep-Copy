@@ -97,7 +97,7 @@ final class RestorePageTest extends TestCase
         self::assertStringContainsString('class="super-sheep-copy-admin-notice super-sheep-copy-admin-notice-warning"', $html);
         self::assertStringNotContainsString('class="notice notice-warning"', $html);
         self::assertStringContainsString('class="super-sheep-copy-footer"', $html);
-        self::assertStringContainsString('Version 0.1.0', $html);
+        self::assertStringContainsString('Version 0.1.1', $html);
         self::assertStringContainsString('href="https://github.com/humbertqz/Super-Sheep-Copy"', $html);
         self::assertTextBefore($html, 'class="super-sheep-copy-header"', 'class="super-sheep-copy-footer"');
     }

@@ -3,7 +3,7 @@ Contributors: super-sheep
 Requires at least: 6.0
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 0.1.0
+Stable tag: 0.1.1
 License: GPLv3 or later
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
 
@@ -110,11 +110,19 @@ No. The WordPress admin validates backups and prepares restore tooling. Destinat
 
 == Changelog ==
 
+= 0.1.1 =
+
+Added scheduled backups, WP-Cron guidance, and a warning when WP-Cron is disabled.
+
 = 0.1.0 =
 
 Initial version with the backup workflow, restore preparation workflow, standalone installer engine, settings screens, diagnostics, package reader/writer layers, URL replacement utilities, rollback helpers, and PHPUnit coverage for the core backup and restore components.
 
 == Upgrade Notice ==
+
+= 0.1.1 =
+
+Adds scheduled backup controls and clearer cron configuration guidance.
 
 = 0.1.0 =
 

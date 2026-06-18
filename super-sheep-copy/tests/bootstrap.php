@@ -32,7 +32,7 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('SUPER_SHEEP_COPY_VERSION')) {
-    define('SUPER_SHEEP_COPY_VERSION', '0.1.0');
+    define('SUPER_SHEEP_COPY_VERSION', '0.1.1');
 }
 
 if (!defined('SUPER_SHEEP_COPY_DIR')) {

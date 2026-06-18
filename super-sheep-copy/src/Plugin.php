@@ -113,7 +113,7 @@ final class Plugin
     {
         $wpdb_client = new WpdbClient($wpdb);
         $database_exporter = new WpdbDatabaseExporter($wpdb_client, new TableSelector());
-        $packager = new BackupArchiveStepPackager(new ManifestBuilder(defined('SUPER_SHEEP_COPY_VERSION') ? SUPER_SHEEP_COPY_VERSION : '0.1.0', '1'));
+        $packager = new BackupArchiveStepPackager(new ManifestBuilder(defined('SUPER_SHEEP_COPY_VERSION') ? SUPER_SHEEP_COPY_VERSION : '0.1.1', '1'));
 
         return new BackupStepRunner(
             $jobs,

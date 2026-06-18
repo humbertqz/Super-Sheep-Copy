@@ -20,7 +20,7 @@ final class DiagnosticsReportBuilderTest extends TestCase
             )),
         ));
 
-        self::assertStringContainsString('Plugin version: 0.1.0', $report);
+        self::assertStringContainsString('Plugin version: 0.1.1', $report);
         self::assertStringContainsString('WordPress version: 6.5', $report);
         self::assertStringContainsString('PHP version:', $report);
         self::assertStringContainsString('Backup storage writable:', $report);

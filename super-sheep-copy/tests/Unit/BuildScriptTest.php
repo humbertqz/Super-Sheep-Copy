@@ -41,7 +41,10 @@ final class BuildScriptTest extends TestCase
 
         self::assertStringContainsString('License: GPLv3 or later', $plugin_header);
         self::assertStringContainsString('License URI: https://www.gnu.org/licenses/gpl-3.0.html', $plugin_header);
+        self::assertStringContainsString('Version: 0.1.1', $plugin_header);
+        self::assertStringContainsString("define('SUPER_SHEEP_COPY_VERSION', '0.1.1');", $plugin_header);
         self::assertStringContainsString('Tested up to: 7.0', $readme);
+        self::assertStringContainsString('Stable tag: 0.1.1', $readme);
         self::assertStringContainsString('License: GPLv3 or later', $readme);
     }
 

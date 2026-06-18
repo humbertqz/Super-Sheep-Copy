@@ -72,7 +72,7 @@ final class BackupPage
         $backup_settings_summary = $backup_settings->summaryLabels();
         $manifest_preview = array(
             'project' => 'Super Sheep Copy',
-            'plugin_version' => defined('SUPER_SHEEP_COPY_VERSION') ? SUPER_SHEEP_COPY_VERSION : '0.1.0',
+            'plugin_version' => defined('SUPER_SHEEP_COPY_VERSION') ? SUPER_SHEEP_COPY_VERSION : '0.1.1',
             'backup_format_version' => '1',
             'source_site_url' => function_exists('site_url') ? site_url() : '',
             'source_home_url' => function_exists('home_url') ? home_url() : '',
