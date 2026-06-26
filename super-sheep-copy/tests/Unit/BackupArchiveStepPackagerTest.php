@@ -266,6 +266,81 @@ final class BackupArchiveStepPackagerTest extends TestCase
         self::assertSame('archive', $payload['backup_bottleneck']);
     }
 
+    public function testPackagingStoresEntriesAndChecksumsOutsidePayload(): void
+    {
+        if (!class_exists(ZipArchive::class)) {
+            self::markTestSkipped('ZipArchive is not available.');
+        }
+
+        $packager = new BackupArchiveStepPackager(new ManifestBuilder('0.1.0', '1'), 2);
+        $site_files = array(
+            new ScannedFile($this->root . '/site/uploads/a.txt', 'uploads/a.txt', 1, false),
+            new ScannedFile($this->root . '/site/uploads/b.txt', 'uploads/b.txt', 1, false),
+        );
+
+        $payload = $packager->packageStep('backup-123', $this->root . '/working', $this->root . '/working/database', $site_files, $this->metadata(), array());
+
+        self::assertFalse($payload['archive_complete']);
+        self::assertArrayHasKey('archive_entries_path', $payload);
+        self::assertArrayHasKey('archive_checksums_path', $payload);
+        self::assertFileExists($payload['archive_entries_path']);
+        self::assertFileExists($payload['archive_checksums_path']);
+        self::assertArrayNotHasKey('archive_entries', $payload);
+        self::assertArrayNotHasKey('archive_checksums', $payload);
+        self::assertStringContainsString('"archive_name":"files/uploads/a.txt"', (string) file_get_contents($payload['archive_entries_path']));
+        self::assertStringContainsString('"files\\/uploads\\/a.txt"', (string) file_get_contents($payload['archive_checksums_path']));
+
+        $payload = $packager->packageStep('backup-123', $this->root . '/working', $this->root . '/working/database', $site_files, $this->metadata(), $payload);
+
+        self::assertTrue($payload['archive_complete']);
+        self::assertArrayNotHasKey('archive_entries', $payload);
+        self::assertArrayNotHasKey('archive_checksums', $payload);
+    }
+
+    public function testPackagingMigratesLegacyPayloadArraysToManifestFiles(): void
+    {
+        if (!class_exists(ZipArchive::class)) {
+            self::markTestSkipped('ZipArchive is not available.');
+        }
+
+        $payload = array(
+            'package_format' => 'zip',
+            'package_extension' => '.zip',
+            'package_schema_version' => 1,
+            'archive_path' => $this->root . '/working/backup-123.zip',
+            'archive_entries' => array(
+                array(
+                    'absolute_path' => $this->root . '/site/uploads/a.txt',
+                    'archive_name' => 'files/uploads/a.txt',
+                    'size' => 1,
+                    'symlink' => false,
+                ),
+                array(
+                    'absolute_path' => $this->root . '/site/uploads/b.txt',
+                    'archive_name' => 'files/uploads/b.txt',
+                    'size' => 1,
+                    'symlink' => false,
+                ),
+            ),
+            'archive_checksums' => array(),
+            'archive_index' => 0,
+            'archive_site_file_count' => 2,
+            'archive_database_file_count' => 0,
+            'archive_started_at' => microtime(true),
+        );
+
+        $packager = new BackupArchiveStepPackager(new ManifestBuilder('0.1.0', '1'), 1);
+        $payload = $packager->packageStep('backup-123', $this->root . '/working', $this->root . '/working/database', array(), $this->metadata(), $payload);
+
+        self::assertFalse($payload['archive_complete']);
+        self::assertArrayHasKey('archive_entries_path', $payload);
+        self::assertArrayHasKey('archive_checksums_path', $payload);
+        self::assertArrayNotHasKey('archive_entries', $payload);
+        self::assertArrayNotHasKey('archive_checksums', $payload);
+        self::assertFileExists($payload['archive_entries_path']);
+        self::assertFileExists($payload['archive_checksums_path']);
+    }
+
     /**
      * @return array<string,mixed>
      */

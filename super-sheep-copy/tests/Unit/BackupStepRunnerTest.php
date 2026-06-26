@@ -167,6 +167,27 @@ final class BackupStepRunnerTest extends TestCase
         self::assertSame('File scan finished.', $job->payload()['message']);
     }
 
+    public function testScanningFilesStoresFileListOutsideJobPayload(): void
+    {
+        $jobs = new BackupStepRunnerJobRepository();
+        $runner = $this->runnerWithPackager($jobs, new BackupStepRunnerPackager(), 100);
+        $payload = $this->payload();
+        $payload['database_directory'] = $this->root . '/work/backup-123/database';
+        mkdir($payload['database_directory'] . '/chunks', 0777, true);
+        file_put_contents($payload['database_directory'] . '/tables.json', '{}');
+        file_put_contents($payload['database_directory'] . '/chunks/wp_posts.part001.sql', 'CREATE TABLE wp_posts;');
+
+        $job = $runner->runStep(new Job('backup-123', 'backup', Job::SCANNING_FILES, $payload));
+
+        self::assertSame(Job::PACKAGING_ARCHIVE, $job->state(), (string) ($job->payload()['message'] ?? ''));
+        self::assertSame(2, $job->payload()['scanned_file_count']);
+        self::assertArrayHasKey('scanned_files_path', $job->payload());
+        self::assertFileExists($job->payload()['scanned_files_path']);
+        self::assertArrayNotHasKey('scanned_files', $job->payload());
+        self::assertStringContainsString('"relative_path":"index.php"', (string) file_get_contents($job->payload()['scanned_files_path']));
+        self::assertStringContainsString('"relative_path":"readme.txt"', (string) file_get_contents($job->payload()['scanned_files_path']));
+    }
+
     public function testFileScanRecordsThroughputAndAdaptiveBatchSize(): void
     {
         $jobs = new BackupStepRunnerJobRepository();

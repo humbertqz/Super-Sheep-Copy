@@ -22,6 +22,39 @@ final class PackageWriterFactoryTest extends TestCase
         self::assertSame('tar.gz', $factory->bestAvailable()->format());
     }
 
+    public function testSelectsDirectoryBeforeTarGzOnShortExecutionTimeHostsWithoutZip(): void
+    {
+        $factory = new PackageWriterFactory(array(
+            new FakePackageWriter('zip', '.zip', false),
+            new FakePackageWriter('tar.gz', '.tar.gz', true),
+            new FakePackageWriter('directory', '', true),
+        ));
+
+        self::assertSame('directory', $factory->bestAvailableForMaxExecutionTime(30)->format());
+    }
+
+    public function testKeepsTarGzFallbackWhenExecutionTimeIsLongEnough(): void
+    {
+        $factory = new PackageWriterFactory(array(
+            new FakePackageWriter('zip', '.zip', false),
+            new FakePackageWriter('tar.gz', '.tar.gz', true),
+            new FakePackageWriter('directory', '', true),
+        ));
+
+        self::assertSame('tar.gz', $factory->bestAvailableForMaxExecutionTime(120)->format());
+    }
+
+    public function testAlwaysPrefersZipWhenAvailableOnShortExecutionTimeHosts(): void
+    {
+        $factory = new PackageWriterFactory(array(
+            new FakePackageWriter('zip', '.zip', true),
+            new FakePackageWriter('tar.gz', '.tar.gz', true),
+            new FakePackageWriter('directory', '', true),
+        ));
+
+        self::assertSame('zip', $factory->bestAvailableForMaxExecutionTime(30)->format());
+    }
+
     public function testThrowsWhenNoWriterIsAvailable(): void
     {
         $factory = new PackageWriterFactory(array(new FakePackageWriter('zip', '.zip', false)));

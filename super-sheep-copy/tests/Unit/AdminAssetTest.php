@@ -14,6 +14,8 @@ final class AdminAssetTest extends TestCase
 
         self::assertStringContainsString('showError(row,', $script);
         self::assertStringContainsString('response.ok', $script);
+        self::assertStringContainsString('response.text().then(function (text)', $script);
+        self::assertStringContainsString('backupErrorMessage(text)', $script);
         self::assertStringContainsString('Unable to parse backup step response.', $script);
         self::assertStringContainsString('data-super-sheep-copy-retry-job', $script);
     }

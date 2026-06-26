@@ -6,6 +6,7 @@ namespace SuperSheepCopy\Backup;
 
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
+use RuntimeException;
 use SplFileInfo;
 
 final class FileScanner
@@ -78,14 +79,21 @@ final class FileScanner
             $payload['file_scan_directories'] = array('');
             $payload['file_scan_current_directory'] = null;
             $payload['file_scan_current_index'] = 0;
-            $payload['scanned_files'] = array();
             $payload['scanned_file_count'] = 0;
+            if ($this->scannedFilesPath($payload) !== '') {
+                $this->writeScannedFilesManifest($this->scannedFilesPath($payload), '');
+                unset($payload['scanned_files']);
+            } else {
+                $payload['scanned_files'] = array();
+            }
         }
 
         $directories = array_values($payload['file_scan_directories']);
         $current_directory = isset($payload['file_scan_current_directory']) && $payload['file_scan_current_directory'] !== null ? (string) $payload['file_scan_current_directory'] : null;
         $current_index = isset($payload['file_scan_current_index']) ? (int) $payload['file_scan_current_index'] : 0;
-        $files = isset($payload['scanned_files']) && is_array($payload['scanned_files']) ? $payload['scanned_files'] : array();
+        $scanned_files_path = $this->scannedFilesPath($payload);
+        $files = $scanned_files_path === '' && isset($payload['scanned_files']) && is_array($payload['scanned_files']) ? $payload['scanned_files'] : array();
+        $scanned_file_count = isset($payload['scanned_file_count']) ? (int) $payload['scanned_file_count'] : count($files);
         $processed = 0;
 
         while ($processed < $batch_size) {
@@ -137,12 +145,18 @@ final class FileScanner
                 continue;
             }
 
-            $files[] = array(
+            $file = array(
                 'absolute_path' => str_replace('\\', '/', $absolute),
                 'relative_path' => str_replace('\\', '/', $relative),
                 'size' => $size,
                 'symlink' => is_link($absolute),
             );
+            if ($scanned_files_path !== '') {
+                $this->appendScannedFile($scanned_files_path, $file);
+            } else {
+                $files[] = $file;
+            }
+            $scanned_file_count++;
         }
 
         if ($current_directory !== null && $current_index >= count($this->directoryEntries($root, $current_directory))) {
@@ -151,7 +165,7 @@ final class FileScanner
         }
 
         $complete = $directories === array() && $current_directory === null;
-        if ($complete) {
+        if ($complete && $scanned_files_path === '') {
             usort($files, static function (array $a, array $b): int {
                 return strcmp((string) $a['relative_path'], (string) $b['relative_path']);
             });
@@ -160,12 +174,46 @@ final class FileScanner
         $payload['file_scan_directories'] = $directories;
         $payload['file_scan_current_directory'] = $current_directory;
         $payload['file_scan_current_index'] = $current_index;
-        $payload['scanned_files'] = $files;
-        $payload['scanned_file_count'] = count($files);
+        if ($scanned_files_path === '') {
+            $payload['scanned_files'] = $files;
+        } else {
+            unset($payload['scanned_files']);
+        }
+        $payload['scanned_file_count'] = $scanned_file_count;
         $payload['file_scan_complete'] = $complete;
-        $payload['message'] = $complete ? 'File scan finished.' : 'Scanned ' . count($files) . ' files.';
+        $payload['message'] = $complete ? 'File scan finished.' : 'Scanned ' . $scanned_file_count . ' files.';
 
         return $payload;
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     */
+    private function scannedFilesPath(array $payload): string
+    {
+        return isset($payload['scanned_files_path']) && is_scalar($payload['scanned_files_path'])
+            ? (string) $payload['scanned_files_path']
+            : '';
+    }
+
+    /**
+     * @param array<string,mixed> $file
+     */
+    private function appendScannedFile(string $path, array $file): void
+    {
+        $encoded = json_encode($file, JSON_UNESCAPED_SLASHES);
+        if (!is_string($encoded)) {
+            throw new RuntimeException('Unable to encode scanned file entry.');
+        }
+
+        $this->writeScannedFilesManifest($path, $encoded . "\n", FILE_APPEND);
+    }
+
+    private function writeScannedFilesManifest(string $path, string $contents, int $flags = 0): void
+    {
+        if (file_put_contents($path, $contents, $flags) === false) {
+            throw new RuntimeException('Unable to write scanned files manifest.');
+        }
     }
 
     /**

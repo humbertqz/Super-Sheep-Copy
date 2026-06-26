@@ -135,6 +135,28 @@ final class BackupStepAjaxHandlerTest extends TestCase
         self::assertSame(Job::PACKAGING_ARCHIVE, $GLOBALS['ssc_test_json_response']['data']['state']);
     }
 
+    public function testRunnerExceptionMarksJobFailedWithJsonResponse(): void
+    {
+        $_REQUEST[Nonce::FIELD] = 'test-nonce';
+        $_REQUEST['job_id'] = 'backup-123';
+        $jobs = new BackupStepAjaxJobRepository(array(
+            new Job('backup-123', 'backup', Job::PACKAGING_ARCHIVE, array('message' => 'Packaging archive.')),
+        ));
+        $handler = new BackupStepAjaxHandler(new Capability(), new Nonce(), $jobs, new BackupStepAjaxThrowingRunner());
+
+        try {
+            $handler->handle();
+        } catch (RuntimeException $exception) {
+            self::assertSame('wp_send_json_success', $exception->getMessage());
+        }
+
+        self::assertSame(true, $GLOBALS['ssc_test_json_response']['success']);
+        self::assertSame(Job::FAILED, $GLOBALS['ssc_test_json_response']['data']['state']);
+        self::assertSame('failed', $GLOBALS['ssc_test_json_response']['data']['status']);
+        self::assertSame('Backup failed: archive close timeout', $GLOBALS['ssc_test_json_response']['data']['message']);
+        self::assertSame(Job::PACKAGING_ARCHIVE, $jobs->find('backup-123')->payload()['failed_state']);
+    }
+
     public function testForeignRunningBackupJobFailsBeforeRunnerExecutes(): void
     {
         $_REQUEST[Nonce::FIELD] = 'test-nonce';
@@ -206,6 +228,14 @@ final class BackupStepAjaxRunner implements BackupStepRunnerInterface
     public function receivedJob(): ?Job
     {
         return $this->received;
+    }
+}
+
+final class BackupStepAjaxThrowingRunner implements BackupStepRunnerInterface
+{
+    public function runStep(Job $job): Job
+    {
+        throw new RuntimeException('archive close timeout');
     }
 }
 

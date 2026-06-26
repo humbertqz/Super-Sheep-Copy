@@ -145,6 +145,29 @@
         updateRunningIndicators();
     }
 
+    function backupErrorMessage(text) {
+        var payload;
+        try {
+            payload = JSON.parse(text);
+        } catch (error) {
+            return text || '';
+        }
+
+        if (payload && payload.data) {
+            if (typeof payload.data === 'string') {
+                return payload.data;
+            }
+            if (payload.data.message) {
+                return payload.data.message;
+            }
+            if (payload.data.error) {
+                return payload.data.error;
+            }
+        }
+
+        return '';
+    }
+
     function runStep(row, retry) {
         row = jobRow(row);
         if (!row || typeof window.ajaxurl !== 'string') {
@@ -168,11 +191,14 @@
             },
             body: body.toString()
         }).then(function (response) {
-            if (!response.ok) {
-                throw new Error('Backup step request failed with HTTP ' + response.status + '.');
-            }
+            return response.text().then(function (text) {
+                if (!response.ok) {
+                    var message = backupErrorMessage(text);
+                    throw new Error(message || 'Backup step request failed with HTTP ' + response.status + '.');
+                }
 
-            return response.text();
+                return text;
+            });
         }).then(function (text) {
             var payload;
             try {

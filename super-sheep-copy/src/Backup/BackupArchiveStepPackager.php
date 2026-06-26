@@ -38,12 +38,13 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
 
     public function packageStep(string $job_id, string $working_directory, string $database_directory, array $site_files, array $metadata, array $payload): array
     {
-        if (!isset($payload['archive_entries']) || !is_array($payload['archive_entries'])) {
+        if (!$this->hasArchiveEntries($payload)) {
             $payload = $this->preparePayload($job_id, $working_directory, $database_directory, $site_files, $payload);
         }
+        $payload = $this->migrateArchivePayloadState($working_directory, $payload);
 
         $archive_path = isset($payload['archive_path']) ? (string) $payload['archive_path'] : '';
-        $entries = isset($payload['archive_entries']) && is_array($payload['archive_entries']) ? array_values($payload['archive_entries']) : array();
+        $entries = $this->archiveEntriesFromPayload($payload);
         $index = isset($payload['archive_index']) ? (int) $payload['archive_index'] : 0;
         $step_start_index = $index;
         $step_start_time = microtime(true);
@@ -55,7 +56,7 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
         if (!isset($payload['archive_started_at'])) {
             $payload['archive_started_at'] = $step_start_time;
         }
-        $checksums = isset($payload['archive_checksums']) && is_array($payload['archive_checksums']) ? $payload['archive_checksums'] : array();
+        $checksums = $this->checksumsFromPayload($payload);
         $writer = $this->writerForPayload($payload);
         $writer->open($this->writePathForPayload($archive_path, $payload));
 
@@ -90,7 +91,7 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
         }
 
         $payload['archive_index'] = $index;
-        $payload['archive_checksums'] = $checksums;
+        $payload = $this->persistChecksums($payload, $checksums);
         $payload = $this->addProgressMetrics($payload, count($entries), $step_start_index, $step_start_time, $step_bytes);
 
         if ($index >= count($entries)) {
@@ -130,7 +131,7 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
             $entries[] = $this->entryForFile('database', $file);
         }
 
-        $writer = $this->package_writer_factory->bestAvailable();
+        $writer = $this->package_writer_factory->bestAvailableForCurrentEnvironment();
         $payload['package_format'] = $writer->format();
         $payload['package_extension'] = $writer->extension();
         $payload['package_schema_version'] = 1;
@@ -138,9 +139,13 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
         if ($writer->format() === 'tar.gz') {
             $payload['archive_staging_path'] = $payload['archive_path'] . '.staging';
         }
-        $payload['archive_entries'] = $entries;
+        $payload['archive_entries_path'] = rtrim($working_directory, '/\\') . '/archive-entries.jsonl';
+        $payload['archive_checksums_path'] = rtrim($working_directory, '/\\') . '/archive-checksums.json';
+        $this->writeArchiveEntries($payload['archive_entries_path'], $entries);
+        $this->writeChecksums($payload['archive_checksums_path'], array());
+        unset($payload['archive_entries'], $payload['archive_checksums']);
+        $payload['archive_entry_count'] = count($entries);
         $payload['archive_index'] = 0;
-        $payload['archive_checksums'] = array();
         $payload['archive_site_file_count'] = count($site_files);
         $payload['archive_database_file_count'] = count($database_files);
         $payload['archive_started_at'] = microtime(true);
@@ -216,7 +221,7 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
         $writer = $this->writerForPayload($payload);
         $writer->open($this->writePathForPayload($archive_path, $payload));
 
-        $checksums = isset($payload['archive_checksums']) && is_array($payload['archive_checksums']) ? $payload['archive_checksums'] : array();
+        $checksums = $this->checksumsFromPayload($payload);
         $metadata['file_count'] = isset($payload['archive_site_file_count']) ? (int) $payload['archive_site_file_count'] : 0;
         $metadata['database_table_count'] = isset($payload['archive_database_file_count']) ? (int) $payload['archive_database_file_count'] : 0;
         $metadata['archive_size'] = isset($payload['archive_size']) ? (int) $payload['archive_size'] : 0;
@@ -298,6 +303,178 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
         }
 
         return $archive_path;
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     */
+    private function hasArchiveEntries(array $payload): bool
+    {
+        return (isset($payload['archive_entries_path']) && is_scalar($payload['archive_entries_path']) && (string) $payload['archive_entries_path'] !== '')
+            || (isset($payload['archive_entries']) && is_array($payload['archive_entries']));
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     * @return array<string,mixed>
+     */
+    private function migrateArchivePayloadState(string $working_directory, array $payload): array
+    {
+        if (isset($payload['archive_entries_path']) && is_scalar($payload['archive_entries_path']) && (string) $payload['archive_entries_path'] !== '') {
+            return $payload;
+        }
+
+        if (!isset($payload['archive_entries']) || !is_array($payload['archive_entries'])) {
+            return $payload;
+        }
+
+        $payload['archive_entries_path'] = rtrim($working_directory, '/\\') . '/archive-entries.jsonl';
+        $payload['archive_checksums_path'] = rtrim($working_directory, '/\\') . '/archive-checksums.json';
+        $this->writeArchiveEntries($payload['archive_entries_path'], array_values(array_filter($payload['archive_entries'], 'is_array')));
+        $this->writeChecksums($payload['archive_checksums_path'], $this->checksumsFromPayload($payload));
+        unset($payload['archive_entries'], $payload['archive_checksums']);
+
+        return $payload;
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     * @return list<array<string,mixed>>
+     */
+    private function archiveEntriesFromPayload(array $payload): array
+    {
+        if (isset($payload['archive_entries_path']) && is_scalar($payload['archive_entries_path']) && (string) $payload['archive_entries_path'] !== '') {
+            return $this->readArchiveEntries((string) $payload['archive_entries_path']);
+        }
+
+        return isset($payload['archive_entries']) && is_array($payload['archive_entries'])
+            ? array_values(array_filter($payload['archive_entries'], 'is_array'))
+            : array();
+    }
+
+    /**
+     * @param list<array<string,mixed>> $entries
+     */
+    private function writeArchiveEntries(string $path, array $entries): void
+    {
+        $lines = array();
+        foreach ($entries as $entry) {
+            $encoded = json_encode($entry, JSON_UNESCAPED_SLASHES);
+            if (!is_string($encoded)) {
+                throw new RuntimeException('Unable to encode archive entry.');
+            }
+            $lines[] = $encoded;
+        }
+
+        if (file_put_contents($path, implode("\n", $lines) . ($lines === array() ? '' : "\n")) === false) {
+            throw new RuntimeException('Unable to write archive entries manifest.');
+        }
+    }
+
+    /**
+     * @return list<array<string,mixed>>
+     */
+    private function readArchiveEntries(string $path): array
+    {
+        if (!is_file($path)) {
+            throw new RuntimeException('Missing archive entries manifest.');
+        }
+
+        $lines = file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        if ($lines === false) {
+            throw new RuntimeException('Unable to read archive entries manifest.');
+        }
+
+        $entries = array();
+        foreach ($lines as $line) {
+            $entry = json_decode((string) $line, true);
+            if (is_array($entry)) {
+                $entries[] = $entry;
+            }
+        }
+
+        return $entries;
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     * @return array<string,string>
+     */
+    private function checksumsFromPayload(array $payload): array
+    {
+        if (isset($payload['archive_checksums_path']) && is_scalar($payload['archive_checksums_path']) && (string) $payload['archive_checksums_path'] !== '') {
+            return $this->readChecksums((string) $payload['archive_checksums_path']);
+        }
+
+        $checksums = array();
+        if (isset($payload['archive_checksums']) && is_array($payload['archive_checksums'])) {
+            foreach ($payload['archive_checksums'] as $path => $checksum) {
+                if (is_scalar($checksum)) {
+                    $checksums[(string) $path] = (string) $checksum;
+                }
+            }
+        }
+
+        return $checksums;
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     * @param array<string,string> $checksums
+     * @return array<string,mixed>
+     */
+    private function persistChecksums(array $payload, array $checksums): array
+    {
+        if (isset($payload['archive_checksums_path']) && is_scalar($payload['archive_checksums_path']) && (string) $payload['archive_checksums_path'] !== '') {
+            $this->writeChecksums((string) $payload['archive_checksums_path'], $checksums);
+            unset($payload['archive_checksums']);
+
+            return $payload;
+        }
+
+        $payload['archive_checksums'] = $checksums;
+
+        return $payload;
+    }
+
+    /**
+     * @return array<string,string>
+     */
+    private function readChecksums(string $path): array
+    {
+        if (!is_file($path)) {
+            return array();
+        }
+
+        $contents = file_get_contents($path);
+        if ($contents === false || trim($contents) === '') {
+            return array();
+        }
+
+        $decoded = json_decode($contents, true);
+        if (!is_array($decoded)) {
+            return array();
+        }
+
+        $checksums = array();
+        foreach ($decoded as $entry_path => $checksum) {
+            if (is_scalar($checksum)) {
+                $checksums[(string) $entry_path] = (string) $checksum;
+            }
+        }
+
+        return $checksums;
+    }
+
+    /**
+     * @param array<string,string> $checksums
+     */
+    private function writeChecksums(string $path, array $checksums): void
+    {
+        $encoded = json_encode($checksums, JSON_PRETTY_PRINT);
+        if (!is_string($encoded) || file_put_contents($path, $encoded) === false) {
+            throw new RuntimeException('Unable to write archive checksums manifest.');
+        }
     }
 
     /**

@@ -12,6 +12,7 @@ use SuperSheepCopy\Jobs\JobRepositoryInterface;
 use SuperSheepCopy\Plugin;
 use SuperSheepCopy\Security\Capability;
 use SuperSheepCopy\Security\Nonce;
+use Throwable;
 
 final class BackupStepAjaxHandler
 {
@@ -59,7 +60,16 @@ final class BackupStepAjaxHandler
             $job = new Job($job->id(), $job->type(), $failed_state, $payload);
         }
 
-        $job = $this->runner->runStep($job);
+        try {
+            $job = $this->runner->runStep($job);
+        } catch (Throwable $throwable) {
+            $payload = $job->payload();
+            $payload['message'] = 'Backup failed: ' . $throwable->getMessage();
+            $payload['error'] = $throwable->getMessage();
+            $payload['failed_state'] = $job->state();
+            $job = new Job($job->id(), $job->type(), Job::FAILED, $payload);
+            $this->jobs->save($job);
+        }
 
         wp_send_json_success($this->responsePayload($job));
     }
