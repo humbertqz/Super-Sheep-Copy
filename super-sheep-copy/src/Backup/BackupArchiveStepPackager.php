@@ -19,6 +19,7 @@ use SuperSheepCopy\Support\Filesystem;
 final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterface
 {
     private const DEFAULT_BATCH_SIZE = 2000;
+    private const ZIP_FALLBACK_BATCH_SIZE = 50;
     private const DEFAULT_TIME_BUDGET_SECONDS = 20.0;
 
     private ManifestBuilder $manifest_builder;
@@ -60,7 +61,9 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
         $writer = $this->writerForPayload($payload);
         $writer->open($this->writePathForPayload($archive_path, $payload));
 
-        $limit = min(count($entries), $index + $this->batch_size);
+        $effective_batch_size = $this->effectiveBatchSize($payload);
+        $payload['archive_effective_batch_size'] = $effective_batch_size;
+        $limit = min(count($entries), $index + $effective_batch_size);
         for (; $index < $limit; $index++) {
             $entry = is_array($entries[$index]) ? $entries[$index] : array();
             if (!empty($entry['symlink'])) {
@@ -303,6 +306,21 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
         }
 
         return $archive_path;
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     */
+    private function effectiveBatchSize(array $payload): int
+    {
+        $format = isset($payload['package_format']) && is_scalar($payload['package_format'])
+            ? (string) $payload['package_format']
+            : '';
+        if ($format === 'pclzip' || $format === 'zip-cli') {
+            return min($this->batch_size, self::ZIP_FALLBACK_BATCH_SIZE);
+        }
+
+        return $this->batch_size;
     }
 
     /**

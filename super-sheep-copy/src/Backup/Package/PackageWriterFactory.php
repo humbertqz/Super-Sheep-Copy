@@ -18,7 +18,9 @@ final class PackageWriterFactory
     {
         $this->writers = $writers ?? array(
             new ZipPackageWriter(),
+            new CliZipPackageWriter(),
             new TarGzPackageWriter(),
+            new PclZipPackageWriter(),
             new DirectoryPackageWriter(),
         );
     }
@@ -36,25 +38,11 @@ final class PackageWriterFactory
 
     public function bestAvailableForCurrentEnvironment(): PackageWriterInterface
     {
-        $max_execution_time = ini_get('max_execution_time');
-
-        return $this->bestAvailableForMaxExecutionTime(is_numeric($max_execution_time) ? (int) $max_execution_time : 0);
+        return $this->bestAvailable();
     }
 
     public function bestAvailableForMaxExecutionTime(int $max_execution_time): PackageWriterInterface
     {
-        $zip = $this->availableWriterByFormat('zip');
-        if ($zip !== null) {
-            return $zip;
-        }
-
-        if ($max_execution_time > 0 && $max_execution_time <= 30) {
-            $directory = $this->availableWriterByFormat('directory');
-            if ($directory !== null) {
-                return $directory;
-            }
-        }
-
         return $this->bestAvailable();
     }
 
@@ -64,16 +52,5 @@ final class PackageWriterFactory
     public function availableWriters(): array
     {
         return $this->writers;
-    }
-
-    private function availableWriterByFormat(string $format): ?PackageWriterInterface
-    {
-        foreach ($this->writers as $writer) {
-            if ($writer->format() === $format && $writer->isAvailable()) {
-                return $writer;
-            }
-        }
-
-        return null;
     }
 }

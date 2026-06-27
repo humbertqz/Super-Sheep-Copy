@@ -4,10 +4,14 @@ declare(strict_types=1);
 
 namespace SuperSheepCopy\Support;
 
+use SuperSheepCopy\Backup\Package\CliZipPackageWriter;
+
 final class EnvironmentChecker implements EnvironmentCheckerInterface
 {
     public function check(): array
     {
+        $cli_zip_available = (new CliZipPackageWriter())->isAvailable();
+
         return array(
             'php_version' => array(
                 'label' => 'PHP version',
@@ -18,6 +22,11 @@ final class EnvironmentChecker implements EnvironmentCheckerInterface
                 'label' => 'ZIP extension',
                 'value' => extension_loaded('zip') ? 'Available' : 'Missing',
                 'status' => extension_loaded('zip') ? 'ok' : 'warning',
+            ),
+            'cli_zip' => array(
+                'label' => 'CLI zip command',
+                'value' => $cli_zip_available ? 'Available' : 'Missing',
+                'status' => $cli_zip_available ? 'ok' : 'warning',
             ),
             'tar_gzip' => array(
                 'label' => 'TAR/GZIP package support',

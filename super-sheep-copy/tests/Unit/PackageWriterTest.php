@@ -7,6 +7,7 @@ namespace SuperSheepCopy\Tests\Unit;
 use PharData;
 use PHPUnit\Framework\TestCase;
 use SuperSheepCopy\Backup\Package\DirectoryPackageWriter;
+use SuperSheepCopy\Backup\Package\CliZipPackageWriter;
 use SuperSheepCopy\Backup\Package\TarGzPackageWriter;
 use SuperSheepCopy\Backup\Package\ZipPackageWriter;
 use ZipArchive;
@@ -53,6 +54,25 @@ final class PackageWriterTest extends TestCase
 
         $zip = new ZipArchive();
         self::assertTrue($zip->open($this->root . '/package.zip'));
+        self::assertSame('{"project":"Super Sheep Copy"}', $zip->getFromName('manifest.json'));
+        self::assertSame('file body', $zip->getFromName('files/source.txt'));
+        $zip->close();
+    }
+
+    public function testCliZipWriterCreatesPackageEntries(): void
+    {
+        $writer = new CliZipPackageWriter();
+        if (!$writer->isAvailable() || !class_exists(ZipArchive::class)) {
+            self::markTestSkipped('CLI zip or ZipArchive is not available.');
+        }
+
+        $writer->open($this->root . '/package-cli.zip');
+        $writer->addString('manifest.json', '{"project":"Super Sheep Copy"}');
+        $writer->addFile($this->root . '/source.txt', 'files/source.txt');
+        $writer->close();
+
+        $zip = new ZipArchive();
+        self::assertTrue($zip->open($this->root . '/package-cli.zip'));
         self::assertSame('{"project":"Super Sheep Copy"}', $zip->getFromName('manifest.json'));
         self::assertSame('file body', $zip->getFromName('files/source.txt'));
         $zip->close();

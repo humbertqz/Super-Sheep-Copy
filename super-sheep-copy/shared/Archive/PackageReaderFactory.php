@@ -17,6 +17,10 @@ final class PackageReaderFactory
             return new TarGzPackageReader($package_path);
         }
 
+        if (!class_exists(\ZipArchive::class)) {
+            return new PclZipPackageReader($package_path);
+        }
+
         return new ZipPackageReader($package_path);
     }
 }

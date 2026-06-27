@@ -95,6 +95,8 @@ final class FileScanner
         $files = $scanned_files_path === '' && isset($payload['scanned_files']) && is_array($payload['scanned_files']) ? $payload['scanned_files'] : array();
         $scanned_file_count = isset($payload['scanned_file_count']) ? (int) $payload['scanned_file_count'] : count($files);
         $processed = 0;
+        $current_directory_entries_for = null;
+        $current_directory_entries = array();
 
         while ($processed < $batch_size) {
             if ($current_directory === null) {
@@ -106,7 +108,7 @@ final class FileScanner
                 $current_index = 0;
             }
 
-            $entries = $this->directoryEntries($root, $current_directory);
+            $entries = $this->cachedDirectoryEntries($root, $current_directory, $current_directory_entries_for, $current_directory_entries);
             if (!isset($entries[$current_index])) {
                 $current_directory = null;
                 $current_index = 0;
@@ -159,7 +161,7 @@ final class FileScanner
             $scanned_file_count++;
         }
 
-        if ($current_directory !== null && $current_index >= count($this->directoryEntries($root, $current_directory))) {
+        if ($current_directory !== null && $current_index >= count($this->cachedDirectoryEntries($root, $current_directory, $current_directory_entries_for, $current_directory_entries))) {
             $current_directory = null;
             $current_index = 0;
         }
@@ -214,6 +216,19 @@ final class FileScanner
         if (file_put_contents($path, $contents, $flags) === false) {
             throw new RuntimeException('Unable to write scanned files manifest.');
         }
+    }
+
+    /**
+     * @return string[]
+     */
+    private function cachedDirectoryEntries(string $root, string $relative_directory, ?string &$cached_directory, array &$cached_entries): array
+    {
+        if ($cached_directory !== $relative_directory) {
+            $cached_directory = $relative_directory;
+            $cached_entries = $this->directoryEntries($root, $relative_directory);
+        }
+
+        return $cached_entries;
     }
 
     /**

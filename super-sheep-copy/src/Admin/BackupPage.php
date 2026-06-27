@@ -186,7 +186,11 @@ final class BackupPage
             return false;
         }
 
-        $this->downloadHandler()->handleRequest();
+        try {
+            $this->downloadHandler()->handleRequest();
+        } catch (Throwable $throwable) {
+            $this->redirect('download_failed');
+        }
 
         return true;
     }

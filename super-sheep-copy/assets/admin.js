@@ -79,24 +79,6 @@
         }
     }
 
-    function updateCurrentProgress(data) {
-        var progress = document.querySelector('[data-super-sheep-copy-current-progress]');
-        if (!progress || progress.getAttribute('data-super-sheep-copy-current-progress-job') !== data.job_id) {
-            return;
-        }
-
-        var state = progress.querySelector('[data-super-sheep-copy-current-progress-state]');
-        var message = progress.querySelector('[data-super-sheep-copy-current-progress-message]');
-        if (state) {
-            state.textContent = data.state;
-        }
-        if (message) {
-            message.textContent = data.message || '';
-        }
-
-        setHidden(progress.querySelector('[data-super-sheep-copy-current-progress-bar]'), !runningStates[data.state]);
-    }
-
     function showError(row, message) {
         row.setAttribute('data-super-sheep-copy-job-state', 'failed');
         row.classList.remove('is-running');
@@ -115,6 +97,18 @@
             }
         }
         showRetry(row);
+        updateRunningIndicators();
+    }
+
+    function showProgressMessage(row, message) {
+        if (row.cells.length >= 4) {
+            var progressMessage = row.querySelector('[data-super-sheep-copy-job-progress-message]');
+            if (progressMessage) {
+                progressMessage.textContent = message;
+            } else {
+                row.cells[3].textContent = message;
+            }
+        }
         updateRunningIndicators();
     }
 
@@ -168,6 +162,22 @@
         return '';
     }
 
+    function isTransientStepError(error) {
+        var message = error && error.message ? error.message : '';
+
+        return message.indexOf('Request Timeout') !== -1
+            || message.indexOf('HTTP 500') !== -1
+            || message.indexOf('Failed to fetch') !== -1
+            || message.indexOf('NetworkError') !== -1;
+    }
+
+    function deleteConfirmationMessage(form) {
+        var input = form.querySelector('input[name="job_id"]');
+        var jobId = input && input.value ? input.value : 'this backup';
+
+        return 'Delete backup ' + jobId + '?\n\nThis permanently removes the job and all backup files. This cannot be undone.';
+    }
+
     function runStep(row, retry) {
         row = jobRow(row);
         if (!row || typeof window.ajaxurl !== 'string') {
@@ -219,7 +229,6 @@
             }
 
             updateRow(row, payload.data);
-            updateCurrentProgress(payload.data);
 
             if (payload.data.status !== 'completed' && payload.data.status !== 'failed') {
                 window.setTimeout(runStep, 100);
@@ -227,6 +236,14 @@
                 window.setTimeout(runStep, 100);
             }
         }).catch(function (error) {
+            if (isTransientStepError(error)) {
+                showProgressMessage(row, 'Request timed out. Continuing backup...');
+                window.setTimeout(function () {
+                    runStep(row, false);
+                }, 5000);
+                return;
+            }
+
             showError(row, error.message || 'Backup step failed. Use Retry / Continue backup to resume.');
         });
     }
@@ -245,11 +262,11 @@
 
     document.addEventListener('submit', function (event) {
         var form = event.target;
-        if (!form || !form.getAttribute || !form.getAttribute('data-super-sheep-copy-delete-job')) {
+        if (!form || !form.hasAttribute || !form.hasAttribute('data-super-sheep-copy-delete-job')) {
             return;
         }
 
-        if (!window.confirm('Are you sure you want to delete this backup job and its files?')) {
+        if (!window.confirm(deleteConfirmationMessage(form))) {
             event.preventDefault();
         }
     });

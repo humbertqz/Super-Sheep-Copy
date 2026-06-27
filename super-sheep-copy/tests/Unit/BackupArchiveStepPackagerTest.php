@@ -208,6 +208,51 @@ final class BackupArchiveStepPackagerTest extends TestCase
         self::assertSame(702, $payload['archive_index']);
     }
 
+    public function testPclZipPackagingUsesSmallBatchesToAvoidRequestTimeouts(): void
+    {
+        $site_files = array();
+        for ($index = 1; $index <= 100; $index++) {
+            $path = $this->root . '/site/uploads/pclzip-file-' . $index . '.txt';
+            file_put_contents($path, 'file ' . $index);
+            $site_files[] = new ScannedFile($path, 'uploads/pclzip-file-' . $index . '.txt', filesize($path) ?: 0, false);
+        }
+
+        $packager = new BackupArchiveStepPackager(
+            new ManifestBuilder('0.1.0', '1'),
+            2000,
+            20.0,
+            new PackageWriterFactory(array(new StepPackagerRecordingWriter('pclzip', '.zip')))
+        );
+        $payload = $packager->packageStep('backup-123', $this->root . '/working', $this->root . '/working/database', $site_files, $this->metadata(), array());
+
+        self::assertFalse($payload['archive_complete']);
+        self::assertSame(50, $payload['archive_index']);
+        self::assertSame('pclzip', $payload['package_format']);
+    }
+
+    public function testCliZipPackagingUsesSmallBatchesToAvoidRequestTimeouts(): void
+    {
+        $site_files = array();
+        for ($index = 1; $index <= 100; $index++) {
+            $path = $this->root . '/site/uploads/cli-zip-file-' . $index . '.txt';
+            file_put_contents($path, 'file ' . $index);
+            $site_files[] = new ScannedFile($path, 'uploads/cli-zip-file-' . $index . '.txt', filesize($path) ?: 0, false);
+        }
+
+        $packager = new BackupArchiveStepPackager(
+            new ManifestBuilder('0.1.0', '1'),
+            2000,
+            20.0,
+            new PackageWriterFactory(array(new StepPackagerRecordingWriter('zip-cli', '.zip')))
+        );
+        $payload = $packager->packageStep('backup-123', $this->root . '/working', $this->root . '/working/database', $site_files, $this->metadata(), array());
+
+        self::assertFalse($payload['archive_complete']);
+        self::assertSame(50, $payload['archive_index']);
+        self::assertSame('zip-cli', $payload['package_format']);
+    }
+
+
     public function testPackagingTimeBudgetStopsBatchAfterAtLeastOneEntry(): void
     {
         if (!class_exists(ZipArchive::class)) {
@@ -409,6 +454,50 @@ final class StepPackagerUnavailableWriter implements PackageWriterInterface
     public function isAvailable(): bool
     {
         return false;
+    }
+
+    public function open(string $package_path): void
+    {
+        file_put_contents($package_path, 'recording writer');
+    }
+
+    public function addFile(string $source_path, string $entry_path): void
+    {
+    }
+
+    public function addString(string $entry_path, string $contents): void
+    {
+    }
+
+    public function close(): void
+    {
+    }
+}
+
+final class StepPackagerRecordingWriter implements PackageWriterInterface
+{
+    private string $format;
+    private string $extension;
+
+    public function __construct(string $format, string $extension)
+    {
+        $this->format = $format;
+        $this->extension = $extension;
+    }
+
+    public function format(): string
+    {
+        return $this->format;
+    }
+
+    public function extension(): string
+    {
+        return $this->extension;
+    }
+
+    public function isAvailable(): bool
+    {
+        return true;
     }
 
     public function open(string $package_path): void

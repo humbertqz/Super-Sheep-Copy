@@ -20,6 +20,16 @@ final class AdminAssetTest extends TestCase
         self::assertStringContainsString('data-super-sheep-copy-retry-job', $script);
     }
 
+    public function testAdminScriptRetriesTransientBackupStepTimeouts(): void
+    {
+        $script = (string) file_get_contents(dirname(__DIR__, 2) . '/assets/admin.js');
+
+        self::assertStringContainsString('function isTransientStepError(error)', $script);
+        self::assertStringContainsString('Request timed out. Continuing backup...', $script);
+        self::assertStringContainsString('window.setTimeout(function () {', $script);
+        self::assertStringContainsString('runStep(row, false);', $script);
+    }
+
     public function testAdminScriptNormalizesRunStepCallbackArgumentsBeforeQueryingRows(): void
     {
         $script = (string) file_get_contents(dirname(__DIR__, 2) . '/assets/admin.js');
@@ -40,15 +50,13 @@ final class AdminAssetTest extends TestCase
         self::assertStringContainsString('updateRunningIndicators();', $script);
     }
 
-    public function testAdminScriptUpdatesCurrentBackupProgressStatus(): void
+    public function testAdminScriptDoesNotTargetRemovedCurrentBackupProgressSection(): void
     {
         $script = (string) file_get_contents(dirname(__DIR__, 2) . '/assets/admin.js');
 
-        self::assertStringContainsString('function updateCurrentProgress(data)', $script);
-        self::assertStringContainsString('data-super-sheep-copy-current-progress', $script);
-        self::assertStringContainsString('data-super-sheep-copy-current-progress-state', $script);
-        self::assertStringContainsString('data-super-sheep-copy-current-progress-message', $script);
-        self::assertStringContainsString('updateCurrentProgress(payload.data);', $script);
+        self::assertStringNotContainsString('function updateCurrentProgress(data)', $script);
+        self::assertStringNotContainsString('data-super-sheep-copy-current-progress', $script);
+        self::assertStringNotContainsString('updateCurrentProgress(payload.data);', $script);
     }
 
     public function testAdminScriptShowsDownloadActionWhenBackupCompletes(): void
@@ -72,7 +80,10 @@ final class AdminAssetTest extends TestCase
         $script = (string) file_get_contents(dirname(__DIR__, 2) . '/assets/admin.js');
 
         self::assertStringContainsString('data-super-sheep-copy-delete-job', $script);
-        self::assertStringContainsString('Are you sure you want to delete this backup job and its files?', $script);
+        self::assertStringContainsString('function deleteConfirmationMessage(form)', $script);
+        self::assertStringContainsString('Delete backup ', $script);
+        self::assertStringContainsString('This permanently removes the job and all backup files. This cannot be undone.', $script);
+        self::assertStringContainsString("form.hasAttribute('data-super-sheep-copy-delete-job')", $script);
         self::assertStringContainsString('window.confirm', $script);
         self::assertStringContainsString('event.preventDefault();', $script);
     }
@@ -84,5 +95,14 @@ final class AdminAssetTest extends TestCase
         self::assertStringContainsString('.super-sheep-copy-restore-workflow', $styles);
         self::assertStringContainsString('.super-sheep-copy-workflow-step', $styles);
         self::assertStringContainsString('.super-sheep-copy-workflow-action', $styles);
+    }
+
+    public function testAdminStylesKeepBackupDetailsAlignedWithMainSections(): void
+    {
+        $styles = (string) file_get_contents(dirname(__DIR__, 2) . '/assets/admin.css');
+
+        self::assertStringContainsString('.super-sheep-copy .super-sheep-copy-backup-details-block', $styles);
+        self::assertStringContainsString('max-width: 960px;', $styles);
+        self::assertStringContainsString('margin: 16px 0;', $styles);
     }
 }

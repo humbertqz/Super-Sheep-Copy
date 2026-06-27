@@ -18,13 +18,9 @@ $running_states = array(
 );
 $performance_metrics = new \SuperSheepCopy\Backup\BackupPerformanceMetrics();
 $has_running_job = false;
-$has_completed_archive = false;
 foreach ($jobs as $job) {
     if (isset($running_states[$job->state()])) {
         $has_running_job = true;
-    }
-    if ($job->type() === 'backup' && $job->state() === \SuperSheepCopy\Jobs\Job::COMPLETED && isset($job->payload()['archive_path'])) {
-        $has_completed_archive = true;
     }
 }
 ?>
@@ -40,14 +36,16 @@ foreach ($jobs as $job) {
     <div class="super-sheep-copy-admin-notice super-sheep-copy-admin-notice-success">
         <p><?php echo esc_html__('Job deleted.', 'super-sheep-copy'); ?></p>
     </div>
+<?php elseif ($status === 'download_failed') : ?>
+    <div class="super-sheep-copy-admin-notice super-sheep-copy-admin-notice-error">
+        <p><?php echo esc_html__('Backup download is not available. Folder package backups stay on the server when ZIP is unavailable.', 'super-sheep-copy'); ?></p>
+    </div>
 <?php endif; ?>
 <div class="wrap super-sheep-copy">
     <?php
     $page_title = __('Super Sheep Copy Backup', 'super-sheep-copy');
     $page_subtitle = __('Create and monitor full-site backup packages.', 'super-sheep-copy');
     include SUPER_SHEEP_COPY_DIR . 'templates/partials/header.php';
-    $current_payload = $current_job instanceof \SuperSheepCopy\Jobs\Job ? $current_job->payload() : array();
-    $current_message = isset($current_payload['message']) && is_scalar($current_payload['message']) ? (string) $current_payload['message'] : '';
     ?>
 
     <div class="super-sheep-copy-backup-dashboard">
@@ -75,67 +73,6 @@ foreach ($jobs as $job) {
             </div>
         </section>
 
-        <section class="super-sheep-copy-backup-block">
-            <div class="super-sheep-copy-backup-block-header">
-                <h2><?php echo esc_html__('Current Backup', 'super-sheep-copy'); ?></h2>
-                <div class="super-sheep-copy-running-summary" data-super-sheep-copy-running-summary<?php echo $has_running_job ? '' : ' hidden'; ?>>
-                    <span class="super-sheep-copy-running-dot" aria-hidden="true"></span>
-                    <strong><?php echo esc_html__('Backup running', 'super-sheep-copy'); ?></strong>
-                </div>
-            </div>
-            <?php if ($current_job instanceof \SuperSheepCopy\Jobs\Job) : ?>
-                <div class="super-sheep-copy-current-progress" data-super-sheep-copy-current-progress data-super-sheep-copy-current-progress-job="<?php echo esc_attr($current_job->id()); ?>">
-                    <h3><?php echo esc_html__('Backup progress', 'super-sheep-copy'); ?></h3>
-                    <div class="super-sheep-copy-progress-stack">
-                        <strong class="super-sheep-copy-status-pill" data-super-sheep-copy-current-progress-state><?php echo esc_html($current_job->state()); ?></strong>
-                        <span data-super-sheep-copy-current-progress-message><?php echo esc_html($current_message); ?></span>
-                        <div class="super-sheep-copy-progress-bar" data-super-sheep-copy-current-progress-bar<?php echo isset($running_states[$current_job->state()]) ? '' : ' hidden'; ?> role="progressbar" aria-label="<?php echo esc_attr(__('Backup progress status', 'super-sheep-copy')); ?>">
-                            <span></span>
-                        </div>
-                    </div>
-                </div>
-            <?php elseif ($has_running_job) : ?>
-                <p><?php echo esc_html__('A backup is running. Keep this page open while steps finish.', 'super-sheep-copy'); ?></p>
-            <?php elseif ($has_completed_archive) : ?>
-                <p><?php echo esc_html__('Latest completed packages are ready in Jobs.', 'super-sheep-copy'); ?></p>
-            <?php else : ?>
-                <p><?php echo esc_html__('No backup is running. Create one when you are ready.', 'super-sheep-copy'); ?></p>
-            <?php endif; ?>
-        </section>
-
-        <section class="super-sheep-copy-backup-block">
-            <h2><?php echo esc_html__('Backup Details', 'super-sheep-copy'); ?></h2>
-            <div class="super-sheep-copy-detail-grid">
-                <details class="super-sheep-copy-workflow-details">
-                    <summary><?php echo esc_html__('Manifest preview', 'super-sheep-copy'); ?></summary>
-                    <table class="widefat striped">
-                        <tbody>
-                        <?php foreach ($manifest_preview as $key => $value) : ?>
-                            <tr>
-                                <th scope="row"><?php echo esc_html((string) $key); ?></th>
-                                <td><?php echo esc_html(is_bool($value) ? ($value ? 'yes' : 'no') : (string) $value); ?></td>
-                            </tr>
-                        <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                </details>
-
-                <details class="super-sheep-copy-workflow-details">
-                    <summary><?php echo esc_html__('Environment checks', 'super-sheep-copy'); ?></summary>
-                    <table class="widefat striped">
-                        <tbody>
-                        <?php foreach ($environment as $check) : ?>
-                            <tr>
-                                <th scope="row"><?php echo esc_html($check['label']); ?></th>
-                                <td><?php echo esc_html($check['value']); ?></td>
-                                <td><?php echo esc_html($check['status']); ?></td>
-                            </tr>
-                        <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                </details>
-            </div>
-        </section>
     </div>
 
     <div class="super-sheep-copy-panel">
@@ -167,6 +104,9 @@ foreach ($jobs as $job) {
                     $is_running_job = isset($running_states[$job->state()]);
                     $progress_message = isset($payload['message']) && is_scalar($payload['message']) ? (string) $payload['message'] : '';
                     $performance_summary = $performance_metrics->summary($payload, $job->state());
+                    $package_format = isset($payload['package_format']) && is_scalar($payload['package_format']) ? (string) $payload['package_format'] : '';
+                    $is_directory_package = $package_format === 'directory';
+                    $has_downloadable_archive = $job->state() === \SuperSheepCopy\Jobs\Job::COMPLETED && isset($payload['archive_path']) && !$is_directory_package;
                     $archive_size = isset($payload['archive_size']) ? (int) $payload['archive_size'] : 0;
                     if ($archive_size >= 1073741824) {
                         $archive_size_label = number_format_i18n($archive_size / 1073741824, 1) . ' GB';
@@ -221,12 +161,16 @@ foreach ($jobs as $job) {
                         <td>
                             <div class="super-sheep-copy-job-actions">
                             <?php if ($job->type() === 'backup') : ?>
-                                <form method="post" data-super-sheep-copy-download-job="<?php echo esc_attr($job->id()); ?>"<?php echo ($job->state() === \SuperSheepCopy\Jobs\Job::COMPLETED && isset($payload['archive_path'])) ? '' : ' hidden'; ?>>
-                                    <?php echo $nonce_field; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
-                                    <input type="hidden" name="super_sheep_copy_action" value="download_backup" />
-                                    <input type="hidden" name="job_id" value="<?php echo esc_attr($job->id()); ?>" />
-                                    <button class="button button-primary" type="submit"><?php echo esc_html__('Download backup', 'super-sheep-copy'); ?></button>
-                                </form>
+                                <?php if ($is_directory_package && $job->state() === \SuperSheepCopy\Jobs\Job::COMPLETED) : ?>
+                                    <span class="super-sheep-copy-muted"><?php echo esc_html__('Folder package on server', 'super-sheep-copy'); ?></span>
+                                <?php else : ?>
+                                    <form method="post" data-super-sheep-copy-download-job="<?php echo esc_attr($job->id()); ?>"<?php echo $has_downloadable_archive ? '' : ' hidden'; ?>>
+                                        <?php echo $nonce_field; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
+                                        <input type="hidden" name="super_sheep_copy_action" value="download_backup" />
+                                        <input type="hidden" name="job_id" value="<?php echo esc_attr($job->id()); ?>" />
+                                        <button class="button button-primary" type="submit"><?php echo esc_html__('Download backup', 'super-sheep-copy'); ?></button>
+                                    </form>
+                                <?php endif; ?>
                             <?php endif; ?>
                             <?php if ($job->state() !== \SuperSheepCopy\Jobs\Job::COMPLETED) : ?>
                                 <button
@@ -252,6 +196,40 @@ foreach ($jobs as $job) {
             </table>
         <?php endif; ?>
     </div>
+
+    <section class="super-sheep-copy-backup-block super-sheep-copy-backup-details-block">
+        <h2><?php echo esc_html__('Backup Details', 'super-sheep-copy'); ?></h2>
+        <div class="super-sheep-copy-detail-grid">
+            <details class="super-sheep-copy-workflow-details">
+                <summary><?php echo esc_html__('Manifest preview', 'super-sheep-copy'); ?></summary>
+                <table class="widefat striped">
+                    <tbody>
+                    <?php foreach ($manifest_preview as $key => $value) : ?>
+                        <tr>
+                            <th scope="row"><?php echo esc_html((string) $key); ?></th>
+                            <td><?php echo esc_html(is_bool($value) ? ($value ? 'yes' : 'no') : (string) $value); ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </details>
+
+            <details class="super-sheep-copy-workflow-details">
+                <summary><?php echo esc_html__('Environment checks', 'super-sheep-copy'); ?></summary>
+                <table class="widefat striped">
+                    <tbody>
+                    <?php foreach ($environment as $check) : ?>
+                        <tr>
+                            <th scope="row"><?php echo esc_html($check['label']); ?></th>
+                            <td><?php echo esc_html($check['value']); ?></td>
+                            <td><?php echo esc_html($check['status']); ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </details>
+        </div>
+    </section>
 
     <?php include SUPER_SHEEP_COPY_DIR . 'templates/partials/footer.php'; ?>
 </div>

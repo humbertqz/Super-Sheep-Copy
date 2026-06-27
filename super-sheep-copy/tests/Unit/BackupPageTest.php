@@ -74,7 +74,7 @@ final class BackupPageTest extends TestCase
         self::assertStringContainsString('class="super-sheep-copy-backup-copy"', $html);
         self::assertStringContainsString('class="super-sheep-copy-settings-summary super-sheep-copy-settings-summary-compact"', $html);
         self::assertTextBefore($html, 'class="super-sheep-copy-backup-action"', 'Backups contain sensitive site data');
-        self::assertTextBefore($html, 'Backups contain sensitive site data', '<h2>Current Backup</h2>');
+        self::assertTextBefore($html, 'Backups contain sensitive site data', '<h2>Jobs</h2>');
         self::assertStringContainsString('class="super-sheep-copy-backup-safety"', $html);
         self::assertStringNotContainsString('class="super-sheep-copy-admin-notice super-sheep-copy-admin-notice-warning"', $html);
         self::assertStringNotContainsString('class="notice notice-warning"', $html);
@@ -190,9 +190,8 @@ final class BackupPageTest extends TestCase
         $html = (string) ob_get_clean();
 
         self::assertHeadingBefore($html, 'Create Backup', 'Jobs');
-        self::assertTextBefore($html, 'Create Backup', 'Current Backup');
-        self::assertTextBefore($html, 'Current Backup', 'Backup Details');
-        self::assertTextBefore($html, 'Backup Details', 'Jobs');
+        self::assertHeadingBefore($html, 'Jobs', 'Backup Details');
+        self::assertStringNotContainsString('Current Backup', $html);
         self::assertStringNotContainsString('Backup Workflow', $html);
         self::assertStringNotContainsString('Run backup steps', $html);
         self::assertStringNotContainsString('Download archive', $html);
@@ -216,7 +215,7 @@ final class BackupPageTest extends TestCase
 
         self::assertStringContainsString('class="super-sheep-copy-backup-dashboard"', $html);
         self::assertStringContainsString('class="super-sheep-copy-backup-block super-sheep-copy-backup-block-primary"', $html);
-        self::assertStringContainsString('class="super-sheep-copy-backup-block"', $html);
+        self::assertStringContainsString('super-sheep-copy-backup-details-block', $html);
         self::assertStringNotContainsString('super-sheep-copy-workflow-step', $html);
     }
 
@@ -300,7 +299,7 @@ final class BackupPageTest extends TestCase
         self::assertStringNotContainsString('3,950.7 MB/min', $html);
     }
 
-    public function testRenderShowsCurrentBackupProgressStatusFromQueuedJob(): void
+    public function testRenderUsesJobsTableInsteadOfDuplicateCurrentBackupSection(): void
     {
         $_GET['job_id'] = 'backup-123';
 
@@ -321,11 +320,34 @@ final class BackupPageTest extends TestCase
         $page->render();
         $html = (string) ob_get_clean();
 
-        self::assertStringContainsString('data-super-sheep-copy-current-progress', $html);
-        self::assertStringContainsString('data-super-sheep-copy-current-progress-job="backup-123"', $html);
-        self::assertStringContainsString('Backup progress', $html);
+        self::assertStringNotContainsString('Current Backup', $html);
+        self::assertStringNotContainsString('data-super-sheep-copy-current-progress', $html);
+        self::assertStringContainsString('Jobs', $html);
         self::assertStringContainsString('Backup queued.', $html);
         self::assertStringContainsString('role="progressbar"', $html);
+    }
+
+    public function testRenderMovesBackupDetailsBelowJobs(): void
+    {
+        $page = new BackupPage(
+            new Capability(),
+            new Nonce(),
+            new BackupPageEnvironmentChecker(),
+            new BackupPageJobRepository(array(new Job('backup-123', 'backup', Job::COMPLETED))),
+            new BackupPageFactory(new BackupPageRunner()),
+            new BackupPageMetadataCollector()
+        );
+
+        ob_start();
+        $page->render();
+        $html = (string) ob_get_clean();
+
+        $jobs_position = strpos($html, 'Jobs');
+        $details_position = strpos($html, 'Backup Details');
+
+        self::assertIsInt($jobs_position);
+        self::assertIsInt($details_position);
+        self::assertGreaterThan($jobs_position, $details_position);
     }
 
     public function testRenderHighlightsRunningBackupJobs(): void
@@ -456,6 +478,30 @@ final class BackupPageTest extends TestCase
         self::assertStringContainsString('1.5 KB', $html);
         self::assertStringContainsString('value="download_backup"', $html);
         self::assertStringContainsString('Download backup', $html);
+    }
+
+    public function testRenderShowsDirectoryPackageAsServerFolderWithoutDownloadAction(): void
+    {
+        $page = new BackupPage(
+            new Capability(),
+            new Nonce(),
+            new BackupPageEnvironmentChecker(),
+            new BackupPageJobRepository(array(new Job('backup-123', 'backup', Job::COMPLETED, array(
+                'archive_path' => '/tmp/backup-123',
+                'archive_size' => 1536,
+                'package_format' => 'directory',
+            )))),
+            new BackupPageFactory(new BackupPageRunner()),
+            new BackupPageMetadataCollector()
+        );
+
+        ob_start();
+        $page->render();
+        $html = (string) ob_get_clean();
+
+        self::assertStringContainsString('Folder package on server', $html);
+        self::assertStringNotContainsString('value="download_backup"', $html);
+        self::assertStringNotContainsString('Download backup', $html);
     }
 
     public function testRenderIncludesHiddenDownloadActionForRunningBackupJob(): void
@@ -589,6 +635,35 @@ final class BackupPageTest extends TestCase
         self::assertDirectoryDoesNotExist($working_directory);
         self::assertSame(array('backup-123'), $jobs->deleted());
         self::assertSame('https://example.com/wp-admin/admin.php?page=super-sheep-copy&super_sheep_copy_status=job_deleted', $GLOBALS['ssc_test_redirect']);
+    }
+
+    public function testPostRedirectsWhenCompletedBackupIsDirectoryPackage(): void
+    {
+        $_POST['super_sheep_copy_action'] = 'download_backup';
+        $_POST['job_id'] = 'backup-123';
+        $_REQUEST['super_sheep_copy_action'] = 'download_backup';
+        $_REQUEST['super_sheep_copy_nonce'] = 'test-nonce';
+
+        $backup_directory = $this->makeDirectory('backups/super-sheep-copy');
+        $working_directory = $this->makeDirectory('backups/super-sheep-copy/backup-123');
+        $jobs = new BackupPageJobRepository(array(new Job('backup-123', 'backup', Job::COMPLETED, array(
+            'working_directory' => $working_directory,
+            'archive_path' => $working_directory,
+            'package_format' => 'directory',
+        ))));
+        $page = new BackupPage(
+            new Capability(),
+            new Nonce(),
+            new BackupPageEnvironmentChecker(),
+            $jobs,
+            new BackupPageFactory(new BackupPageRunner()),
+            new BackupPageMetadataCollector(),
+            new BackupJobFileCleaner($backup_directory)
+        );
+
+        $page->handleActions();
+
+        self::assertSame('https://example.com/wp-admin/admin.php?page=super-sheep-copy&super_sheep_copy_status=download_failed', $GLOBALS['ssc_test_redirect']);
     }
 
     public function testPostQueuesBackupAndRedirectsWithSuccess(): void

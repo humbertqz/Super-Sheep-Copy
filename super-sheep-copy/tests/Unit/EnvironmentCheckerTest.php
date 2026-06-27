@@ -15,12 +15,14 @@ final class EnvironmentCheckerTest extends TestCase
 
         self::assertArrayHasKey('php_version', $checks);
         self::assertArrayHasKey('zip', $checks);
+        self::assertArrayHasKey('cli_zip', $checks);
         self::assertArrayHasKey('tar_gzip', $checks);
         self::assertArrayHasKey('folder_package', $checks);
         self::assertArrayHasKey('label', $checks['php_version']);
         self::assertArrayHasKey('value', $checks['php_version']);
         self::assertArrayHasKey('status', $checks['php_version']);
         self::assertSame('TAR/GZIP package support', $checks['tar_gzip']['label']);
+        self::assertSame('CLI zip command', $checks['cli_zip']['label']);
         self::assertSame('Folder package fallback', $checks['folder_package']['label']);
     }
 }
