@@ -271,6 +271,19 @@ if (!function_exists('update_option')) {
     }
 }
 
+if (!function_exists('delete_option')) {
+    function delete_option(string $name): bool
+    {
+        if (!array_key_exists($name, $GLOBALS['ssc_test_options'])) {
+            return false;
+        }
+
+        unset($GLOBALS['ssc_test_options'][$name]);
+
+        return true;
+    }
+}
+
 if (!function_exists('get_mu_plugins')) {
     function get_mu_plugins(): array
     {

@@ -52,6 +52,19 @@ final class Plugin
 
     public static function deactivate(): void
     {
+        self::clearScheduledHooks();
+    }
+
+    public static function uninstall(): void
+    {
+        self::clearScheduledHooks();
+        self::deletePluginOptions();
+        Filesystem::removeDirectory(self::backupDirectory());
+        self::deletePreparedInstallerFiles();
+    }
+
+    private static function clearScheduledHooks(): void
+    {
         if (function_exists('wp_clear_scheduled_hook')) {
             wp_clear_scheduled_hook(ScheduleEventScheduler::DUE_HOOK);
             wp_clear_scheduled_hook(ScheduleEventScheduler::CONTINUE_HOOK);
@@ -134,5 +147,48 @@ final class Plugin
             : WP_CONTENT_DIR . '/uploads';
 
         return trailingslashit($base_dir) . 'super-sheep-copy';
+    }
+
+    private static function deletePluginOptions(): void
+    {
+        foreach (
+            array(
+                'super_sheep_copy_jobs',
+                BackupSettingsRepository::OPTION_NAME,
+                ScheduleSettingsRepository::OPTION_NAME,
+            ) as $option
+        ) {
+            delete_option($option);
+        }
+    }
+
+    private static function deletePreparedInstallerFiles(): void
+    {
+        if (!defined('ABSPATH')) {
+            return;
+        }
+
+        $root = rtrim((string) ABSPATH, '/\\');
+        $installer = $root . '/installer.php';
+        if (self::isPreparedInstallerFile($installer)) {
+            Filesystem::deleteFile($installer);
+        }
+
+        Filesystem::removeDirectory($root . '/ssc-restore-engine');
+    }
+
+    private static function isPreparedInstallerFile(string $path): bool
+    {
+        if (!is_readable($path) || !is_file($path)) {
+            return false;
+        }
+
+        $contents = file_get_contents($path);
+        if (!is_string($contents)) {
+            return false;
+        }
+
+        return strpos($contents, '/ssc-restore-engine/Bootstrap.php') !== false
+            && strpos($contents, 'SuperSheepCopyInstaller\\Bootstrap::run') !== false;
     }
 }
