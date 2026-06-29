@@ -66,7 +66,8 @@ final class BackupPage
         $this->autoCleanFailedBackupFiles();
 
         $environment = $this->environment_checker->check();
-        $jobs = $this->jobs->all();
+        $jobs = $this->jobsForDisplay();
+        $job_created_date_labels = $this->jobCreatedDateLabels($jobs);
         $current_job = $this->currentJob();
         $backup_settings = $this->settings->get();
         $backup_settings_summary = $backup_settings->summaryLabels();
@@ -278,6 +279,119 @@ final class BackupPage
         }
 
         $this->jobFileCleaner()->cleanFailedJobs($this->jobs->all(), 86400);
+    }
+
+    /**
+     * @return list<Job>
+     */
+    private function jobsForDisplay(): array
+    {
+        $indexed_jobs = array();
+        foreach ($this->jobs->all() as $index => $job) {
+            $indexed_jobs[] = array(
+                'index' => $index,
+                'timestamp' => $this->jobTimestamp($job),
+                'job' => $job,
+            );
+        }
+
+        usort($indexed_jobs, static function (array $a, array $b): int {
+            if ($a['timestamp'] === $b['timestamp']) {
+                return $a['index'] <=> $b['index'];
+            }
+
+            return $b['timestamp'] <=> $a['timestamp'];
+        });
+
+        return array_map(static function (array $indexed_job): Job {
+            return $indexed_job['job'];
+        }, $indexed_jobs);
+    }
+
+    private function jobTimestamp(Job $job): int
+    {
+        $payload = $job->payload();
+        $updated_at = isset($payload['updated_at']) && is_scalar($payload['updated_at'])
+            ? strtotime((string) $payload['updated_at'])
+            : false;
+        if ($updated_at !== false) {
+            return $updated_at;
+        }
+
+        if (isset($payload['backup_completed_at']) && is_numeric($payload['backup_completed_at'])) {
+            return (int) $payload['backup_completed_at'];
+        }
+
+        return $this->jobIdTimestamp($job);
+    }
+
+    /**
+     * @param list<Job> $jobs
+     * @return array<string,string>
+     */
+    private function jobCreatedDateLabels(array $jobs): array
+    {
+        $labels = array();
+        foreach ($jobs as $job) {
+            $labels[$job->id()] = $this->jobCreatedDateLabel($job);
+        }
+
+        return $labels;
+    }
+
+    private function jobCreatedDateLabel(Job $job): string
+    {
+        $timestamp = $this->jobCreatedTimestamp($job);
+        if ($timestamp <= 0) {
+            return '';
+        }
+
+        if (function_exists('wp_date')) {
+            $date_format = get_option('date_format', 'Y-m-d');
+            $time_format = get_option('time_format', 'H:i');
+
+            return wp_date((string) $date_format . ' ' . (string) $time_format, $timestamp);
+        }
+
+        return gmdate('Y-m-d H:i', $timestamp) . ' UTC';
+    }
+
+    private function jobCreatedTimestamp(Job $job): int
+    {
+        $from_id = $this->jobIdTimestamp($job);
+        if ($from_id > 0) {
+            return $from_id;
+        }
+
+        $payload = $job->payload();
+        $created_at = isset($payload['created_at']) && is_scalar($payload['created_at'])
+            ? strtotime((string) $payload['created_at'])
+            : false;
+        if ($created_at !== false) {
+            return $created_at;
+        }
+
+        $updated_at = isset($payload['updated_at']) && is_scalar($payload['updated_at'])
+            ? strtotime((string) $payload['updated_at'])
+            : false;
+        if ($updated_at !== false) {
+            return $updated_at;
+        }
+
+        return isset($payload['backup_completed_at']) && is_numeric($payload['backup_completed_at'])
+            ? (int) $payload['backup_completed_at']
+            : 0;
+    }
+
+    private function jobIdTimestamp(Job $job): int
+    {
+        if (preg_match('/^(?:backup|restore)-(\d{8})-(\d{6})-/', $job->id(), $matches) !== 1) {
+            return 0;
+        }
+
+        $from_id = strtotime($matches[1] . $matches[2] . ' UTC');
+
+        return $from_id !== false ? $from_id : 0;
     }
 
     /**

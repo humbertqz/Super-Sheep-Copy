@@ -5,6 +5,7 @@
  * @var \SuperSheepCopy\Jobs\Job|null $current_job
  * @var string[] $backup_settings_summary
  * @var list<\SuperSheepCopy\Jobs\Job> $jobs
+ * @var array<string, string> $job_created_date_labels
  * @var array<string, mixed> $manifest_preview
  * @var string $nonce_field
  * @var string $status
@@ -91,6 +92,7 @@ foreach ($jobs as $job) {
                 <thead>
                 <tr>
                     <th><?php echo esc_html__('Job', 'super-sheep-copy'); ?></th>
+                    <th><?php echo esc_html__('Created', 'super-sheep-copy'); ?></th>
                     <th><?php echo esc_html__('Status', 'super-sheep-copy'); ?></th>
                     <th><?php echo esc_html__('Progress', 'super-sheep-copy'); ?></th>
                     <th><?php echo esc_html__('Archive', 'super-sheep-copy'); ?></th>
@@ -101,6 +103,7 @@ foreach ($jobs as $job) {
                 <?php foreach ($jobs as $job) : ?>
                     <?php
                     $payload = $job->payload();
+                    $created_date_label = isset($job_created_date_labels[$job->id()]) ? $job_created_date_labels[$job->id()] : '';
                     $is_running_job = isset($running_states[$job->state()]);
                     $progress_message = isset($payload['message']) && is_scalar($payload['message']) ? (string) $payload['message'] : '';
                     $performance_summary = $performance_metrics->summary($payload, $job->state());
@@ -133,6 +136,13 @@ foreach ($jobs as $job) {
                         <td>
                             <strong><?php echo esc_html($job->id()); ?></strong>
                             <small><?php echo esc_html($job->type()); ?></small>
+                        </td>
+                        <td>
+                            <?php if ($created_date_label !== '') : ?>
+                                <span class="super-sheep-copy-job-date"><?php echo esc_html($created_date_label); ?></span>
+                            <?php else : ?>
+                                <span class="super-sheep-copy-muted"><?php echo esc_html__('Unknown', 'super-sheep-copy'); ?></span>
+                            <?php endif; ?>
                         </td>
                         <td>
                             <span class="super-sheep-copy-status-pill" data-super-sheep-copy-job-state-label><?php echo esc_html($job->state()); ?></span>
@@ -168,7 +178,14 @@ foreach ($jobs as $job) {
                                         <?php echo $nonce_field; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
                                         <input type="hidden" name="super_sheep_copy_action" value="download_backup" />
                                         <input type="hidden" name="job_id" value="<?php echo esc_attr($job->id()); ?>" />
-                                        <button class="button button-primary" type="submit"><?php echo esc_html__('Download backup', 'super-sheep-copy'); ?></button>
+                                        <button class="button button-primary super-sheep-copy-icon-button" type="submit" aria-label="<?php echo esc_attr(__('Download backup', 'super-sheep-copy')); ?>" title="<?php echo esc_attr(__('Download backup', 'super-sheep-copy')); ?>">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon icon-tabler icons-tabler-outline icon-tabler-cloud-download" aria-hidden="true" focusable="false">
+                                                <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+                                                <path d="M19 18a3.5 3.5 0 0 0 0 -7h-1a5 4.5 0 0 0 -11 -2a4.6 4.4 0 0 0 -2.1 8.4" />
+                                                <path d="M12 13l0 9" />
+                                                <path d="M9 19l3 3l3 -3" />
+                                            </svg>
+                                        </button>
                                     </form>
                                 <?php endif; ?>
                             <?php endif; ?>
@@ -186,7 +203,16 @@ foreach ($jobs as $job) {
                                 <?php echo $nonce_field; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
                                 <input type="hidden" name="super_sheep_copy_action" value="delete_job" />
                                 <input type="hidden" name="job_id" value="<?php echo esc_attr($job->id()); ?>" />
-                                <button class="button" type="submit"><?php echo esc_html__('Delete', 'super-sheep-copy'); ?></button>
+                                <button class="button super-sheep-copy-icon-button" type="submit" aria-label="<?php echo esc_attr(__('Delete', 'super-sheep-copy')); ?>" title="<?php echo esc_attr(__('Delete', 'super-sheep-copy')); ?>">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon icon-tabler icons-tabler-outline icon-tabler-trash" aria-hidden="true" focusable="false">
+                                        <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+                                        <path d="M4 7l16 0" />
+                                        <path d="M10 11l0 6" />
+                                        <path d="M14 11l0 6" />
+                                        <path d="M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12" />
+                                        <path d="M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3" />
+                                    </svg>
+                                </button>
                             </form>
                             </div>
                         </td>

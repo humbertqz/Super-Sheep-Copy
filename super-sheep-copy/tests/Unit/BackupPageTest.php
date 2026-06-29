@@ -243,6 +243,54 @@ final class BackupPageTest extends TestCase
         self::assertStringNotContainsString('Exporting table <wp_posts>', $html);
     }
 
+    public function testRenderShowsLatestBackupJobFirst(): void
+    {
+        $page = new BackupPage(
+            new Capability(),
+            new Nonce(),
+            new BackupPageEnvironmentChecker(),
+            new BackupPageJobRepository(array(
+                new Job('backup-old', 'backup', Job::COMPLETED, array(
+                    'message' => 'Old backup completed.',
+                    'updated_at' => '2026-06-28T10:00:00+00:00',
+                )),
+                new Job('backup-new', 'backup', Job::COMPLETED, array(
+                    'message' => 'New backup completed.',
+                    'updated_at' => '2026-06-29T10:00:00+00:00',
+                )),
+            )),
+            new BackupPageFactory(new BackupPageRunner()),
+            new BackupPageMetadataCollector()
+        );
+
+        ob_start();
+        $page->render();
+        $html = (string) ob_get_clean();
+
+        self::assertTextBefore($html, 'backup-new', 'backup-old');
+    }
+
+    public function testRenderShowsBackupCreatedDateColumn(): void
+    {
+        $page = new BackupPage(
+            new Capability(),
+            new Nonce(),
+            new BackupPageEnvironmentChecker(),
+            new BackupPageJobRepository(array(new Job('backup-20260629-101112-abcd1234', 'backup', Job::COMPLETED, array(
+                'updated_at' => '2026-06-30T08:00:00+00:00',
+            )))),
+            new BackupPageFactory(new BackupPageRunner()),
+            new BackupPageMetadataCollector()
+        );
+
+        ob_start();
+        $page->render();
+        $html = (string) ob_get_clean();
+
+        self::assertStringContainsString('Created</th>', $html);
+        self::assertStringContainsString('2026-06-29 10:11 UTC', $html);
+    }
+
     public function testRenderShowsBackupThroughputAndBottleneck(): void
     {
         $page = new BackupPage(
@@ -453,6 +501,8 @@ final class BackupPageTest extends TestCase
         self::assertStringContainsString('name="job_id" value="backup-123"', $html);
         self::assertStringContainsString('data-super-sheep-copy-delete-job', $html);
         self::assertStringContainsString('Delete', $html);
+        self::assertStringContainsString('super-sheep-copy-icon-button', $html);
+        self::assertStringContainsString('icon-tabler-trash', $html);
     }
 
     public function testRenderShowsArchiveSizeAndDownloadActionForCompletedJob(): void
@@ -478,6 +528,7 @@ final class BackupPageTest extends TestCase
         self::assertStringContainsString('1.5 KB', $html);
         self::assertStringContainsString('value="download_backup"', $html);
         self::assertStringContainsString('Download backup', $html);
+        self::assertStringContainsString('icon-tabler-cloud-download', $html);
     }
 
     public function testRenderShowsDirectoryPackageAsServerFolderWithoutDownloadAction(): void

@@ -614,11 +614,34 @@
   align-items: flex-start;
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
 }
 
 .super-sheep-copy .super-sheep-copy-job-actions form {
   margin: 0;
+}
+
+.super-sheep-copy .super-sheep-copy-job-date {
+  color: #1d2327;
+  display: inline-block;
+  font-variant-numeric: tabular-nums;
+  min-width: 120px;
+  white-space: nowrap;
+}
+
+.super-sheep-copy .super-sheep-copy-icon-button.button {
+  align-items: center;
+  display: inline-flex;
+  height: 32px;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0;
+  width: 32px;
+}
+
+.super-sheep-copy .super-sheep-copy-icon-button svg {
+  height: 17px;
+  width: 17px;
 }
 
 .super-sheep-copy .super-sheep-copy-progress-stack {
