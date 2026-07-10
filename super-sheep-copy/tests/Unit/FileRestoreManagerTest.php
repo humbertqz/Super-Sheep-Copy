@@ -427,12 +427,15 @@ final class FileRestoreManagerTest extends TestCase
         $zip = new ZipArchive();
         self::assertTrue($zip->open($archive, ZipArchive::CREATE | ZipArchive::OVERWRITE));
         $zip->addFromString('manifest.json', json_encode(array('project' => 'Super Sheep Copy')));
-        $zip->addFromString('checksums.json', '{}');
         $zip->addFromString('database/tables.json', '{}');
         $zip->addFromString('database/chunks/wp_posts.part001.sql', 'CREATE TABLE wp_posts;');
         foreach ($entries as $name => $contents) {
             $zip->addFromString($name, $contents);
         }
+        $zip->addFromString('checksums.json', $this->checksums(array_merge(array(
+            'database/tables.json' => '{}',
+            'database/chunks/wp_posts.part001.sql' => 'CREATE TABLE wp_posts;',
+        ), $entries)));
         $zip->close();
 
         return $archive;
@@ -446,10 +449,10 @@ final class FileRestoreManagerTest extends TestCase
         $archive = $this->engine_dir . '/backup-' . bin2hex(random_bytes(3));
         $base_entries = array(
             'manifest.json' => (string) json_encode(array('project' => 'Super Sheep Copy')),
-            'checksums.json' => '{}',
             'database/tables.json' => '{}',
             'database/chunks/wp_posts.part001.sql' => 'CREATE TABLE wp_posts;',
         );
+        $base_entries['checksums.json'] = $this->checksums(array_merge($base_entries, $entries));
 
         foreach (array_merge($base_entries, $entries) as $name => $contents) {
             $path = $archive . '/' . $name;
@@ -477,6 +480,21 @@ final class FileRestoreManagerTest extends TestCase
         }
 
         return $archive;
+    }
+
+    /**
+     * @param array<string,string> $entries
+     */
+    private function checksums(array $entries): string
+    {
+        $checksums = array();
+        foreach ($entries as $path => $contents) {
+            if (strpos($path, 'files/') === 0 || strpos($path, 'database/') === 0) {
+                $checksums[$path] = hash('sha256', $contents);
+            }
+        }
+
+        return (string) json_encode($checksums);
     }
 
     /**

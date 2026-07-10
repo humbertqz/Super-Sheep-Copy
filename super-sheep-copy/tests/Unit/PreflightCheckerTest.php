@@ -154,10 +154,14 @@ final class PreflightCheckerTest extends TestCase
             'source_site_url' => 'https://source.example',
             'source_home_url' => 'https://source.example/home',
         )));
-        $zip->addFromString('checksums.json', '{}');
         $zip->addFromString('database/tables.json', '{}');
         $zip->addFromString('database/chunks/wp_posts.part001.sql', 'CREATE TABLE wp_posts;');
         $zip->addFromString('files/index.php', '<?php echo "site";');
+        $zip->addFromString('checksums.json', (string) json_encode(array(
+            'database/tables.json' => hash('sha256', '{}'),
+            'database/chunks/wp_posts.part001.sql' => hash('sha256', 'CREATE TABLE wp_posts;'),
+            'files/index.php' => hash('sha256', '<?php echo "site";'),
+        )));
         $zip->close();
 
         return $archive;
