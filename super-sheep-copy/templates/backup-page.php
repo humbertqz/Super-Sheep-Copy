@@ -16,6 +16,7 @@ $running_states = array(
     \SuperSheepCopy\Jobs\Job::EXPORTING_DATABASE => true,
     \SuperSheepCopy\Jobs\Job::SCANNING_FILES => true,
     \SuperSheepCopy\Jobs\Job::PACKAGING_ARCHIVE => true,
+    \SuperSheepCopy\Jobs\Job::VALIDATING_BACKUP => true,
 );
 $performance_metrics = new \SuperSheepCopy\Backup\BackupPerformanceMetrics();
 $has_running_job = false;

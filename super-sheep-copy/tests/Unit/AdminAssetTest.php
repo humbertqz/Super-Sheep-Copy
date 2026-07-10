@@ -75,6 +75,13 @@ final class AdminAssetTest extends TestCase
         self::assertStringNotContainsString('window.setTimeout(runStep, 500)', $script);
     }
 
+    public function testAdminScriptKeepsPollingDuringBackupValidation(): void
+    {
+        $script = (string) file_get_contents(dirname(__DIR__, 2) . '/assets/admin.js');
+
+        self::assertStringContainsString('validating_backup: true', $script);
+    }
+
     public function testAdminScriptConfirmsBackupDeleteSubmissions(): void
     {
         $script = (string) file_get_contents(dirname(__DIR__, 2) . '/assets/admin.js');

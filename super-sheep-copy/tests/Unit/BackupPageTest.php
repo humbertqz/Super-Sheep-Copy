@@ -427,6 +427,32 @@ final class BackupPageTest extends TestCase
         self::assertStringContainsString('Scanning uploads', $html);
     }
 
+    public function testRenderTreatsBackupValidationAsRunning(): void
+    {
+        $page = new BackupPage(
+            new Capability(),
+            new Nonce(),
+            new BackupPageEnvironmentChecker(),
+            new BackupPageJobRepository(array(
+                new Job('backup-123', 'backup', Job::VALIDATING_BACKUP, array(
+                    'message' => 'Backup archive ready. Starting validation.',
+                )),
+            )),
+            new BackupPageFactory(new BackupPageRunner()),
+            new BackupPageMetadataCollector()
+        );
+
+        ob_start();
+        $page->render();
+        $html = (string) ob_get_clean();
+
+        self::assertStringContainsString('data-super-sheep-copy-running-summary', $html);
+        self::assertStringContainsString('class="super-sheep-copy-job-row is-running"', $html);
+        self::assertStringContainsString('data-super-sheep-copy-job-state="validating_backup"', $html);
+        self::assertStringContainsString('data-super-sheep-copy-progress-bar', $html);
+        self::assertStringNotContainsString('data-super-sheep-copy-progress-bar hidden', $html);
+    }
+
     public function testRenderHidesRunningBackupSummaryWhenNoJobIsRunning(): void
     {
         $page = new BackupPage(

@@ -17,7 +17,7 @@ final class BackupJobSiteGuard
 
     private function isRunningBackupState(string $state): bool
     {
-        return in_array($state, array(Job::CREATED, Job::EXPORTING_DATABASE, Job::SCANNING_FILES, Job::PACKAGING_ARCHIVE), true);
+        return in_array($state, array(Job::CREATED, Job::EXPORTING_DATABASE, Job::SCANNING_FILES, Job::PACKAGING_ARCHIVE, Job::VALIDATING_BACKUP), true);
     }
 
     private function isForeignBackupJob(Job $job, string $site_root, string $backup_directory): bool

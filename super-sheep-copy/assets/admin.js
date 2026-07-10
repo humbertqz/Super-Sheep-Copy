@@ -5,7 +5,8 @@
         created: true,
         exporting_database: true,
         scanning_files: true,
-        packaging_archive: true
+        packaging_archive: true,
+        validating_backup: true
     };
 
     function setHidden(element, hidden) {
