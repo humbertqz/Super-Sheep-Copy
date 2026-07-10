@@ -22,6 +22,7 @@ final class ArchiveValidator
         $has_database_tables = false;
         $has_database_chunk = false;
         $has_file_entry = false;
+        $content_entries = array();
 
         try {
             $reader = (new PackageReaderFactory())->create($archive_path);
@@ -46,6 +47,7 @@ final class ArchiveValidator
 
             if (strpos($name, 'database/') === 0 && substr($name, -1) !== '/') {
                 $database_entry_count++;
+                $content_entries[] = $name;
             }
 
             if ($name === 'database/tables.json') {
@@ -58,6 +60,7 @@ final class ArchiveValidator
 
             if (strpos($name, 'files/') === 0 && substr($name, -1) !== '/') {
                 $has_file_entry = true;
+                $content_entries[] = $name;
             }
         }
 
@@ -98,6 +101,47 @@ final class ArchiveValidator
             }
         }
 
+        if ($has_checksums) {
+            $errors = array_merge($errors, $this->validateChecksums($reader, $content_entries));
+        }
+
         return new ArchiveValidationResult($errors === array(), $errors, $manifest, $entry_count, $database_entry_count);
+    }
+
+    /**
+     * @param string[] $content_entries
+     * @return string[]
+     */
+    private function validateChecksums(PackageReaderInterface $reader, array $content_entries): array
+    {
+        $checksum_json = $reader->read('checksums.json');
+        $checksums = is_string($checksum_json) ? json_decode($checksum_json, true) : null;
+        if (!is_array($checksums) || $checksums === array()) {
+            return array('checksums.json must contain SHA-256 checksums.');
+        }
+
+        $errors = array();
+        foreach ($content_entries as $entry) {
+            if (!array_key_exists($entry, $checksums)) {
+                $errors[] = 'Missing checksum for archive entry: ' . $entry;
+                continue;
+            }
+            $checksum = $checksums[$entry];
+            if (!is_string($checksum) || preg_match('/^[a-f0-9]{64}$/', $checksum) !== 1) {
+                $errors[] = 'Invalid SHA-256 checksum for archive entry: ' . $entry;
+                continue;
+            }
+            if ($reader->sha256($entry) !== $checksum) {
+                $errors[] = 'Checksum mismatch for archive entry: ' . $entry;
+            }
+        }
+
+        foreach ($checksums as $entry => $checksum) {
+            if (!is_string($entry) || !in_array($entry, $content_entries, true)) {
+                $errors[] = 'Unexpected checksum for archive entry: ' . (string) $entry;
+            }
+        }
+
+        return $errors;
     }
 }

@@ -38,7 +38,11 @@ final class ArchiveValidatorTest extends TestCase
                 'source_site_url' => 'https://source.example',
                 'source_home_url' => 'https://source.example',
             )),
-            'checksums.json' => '{}',
+            'checksums.json' => $this->checksums(array(
+                'database/tables.json' => '{}',
+                'database/chunks/wp_posts.part001.sql' => 'CREATE TABLE wp_posts;',
+                'files/index.php' => '<?php echo "site";',
+            )),
             'database/tables.json' => '{}',
             'database/chunks/wp_posts.part001.sql' => 'CREATE TABLE wp_posts;',
             'files/index.php' => '<?php echo "site";',
@@ -53,6 +57,28 @@ final class ArchiveValidatorTest extends TestCase
         self::assertSame(2, $result->databaseEntryCount());
     }
 
+    public function testRejectsChecksumMismatch(): void
+    {
+        if (!class_exists(\ZipArchive::class)) {
+            self::markTestSkipped('ZipArchive is not available.');
+        }
+
+        $result = (new ArchiveValidator())->validatePackage($this->createArchive(array(
+            'manifest.json' => json_encode(array('project' => 'Super Sheep Copy')),
+            'checksums.json' => json_encode(array(
+                'database/tables.json' => hash('sha256', '{}'),
+                'database/chunks/wp_posts.part001.sql' => hash('sha256', 'CREATE TABLE wp_posts;'),
+                'files/index.php' => hash('sha256', 'original'),
+            )),
+            'database/tables.json' => '{}',
+            'database/chunks/wp_posts.part001.sql' => 'CREATE TABLE wp_posts;',
+            'files/index.php' => 'changed',
+        )));
+
+        self::assertFalse($result->isValid());
+        self::assertContains('Checksum mismatch for archive entry: files/index.php', $result->errors());
+    }
+
     public function testRejectsPackageWithoutManifest(): void
     {
         if (!class_exists(\ZipArchive::class)) {
@@ -60,7 +86,11 @@ final class ArchiveValidatorTest extends TestCase
         }
 
         $archive = $this->createArchive(array(
-            'checksums.json' => '{}',
+            'checksums.json' => $this->checksums(array(
+                'database/tables.json' => '{}',
+                'database/chunks/wp_posts.part001.sql' => 'CREATE TABLE wp_posts;',
+                'files/index.php' => '<?php echo "site";',
+            )),
             'database/tables.json' => '{}',
         ));
 
@@ -78,7 +108,11 @@ final class ArchiveValidatorTest extends TestCase
 
         $archive = $this->createArchive(array(
             'manifest.json' => json_encode(array('project' => 'Super Sheep Copy')),
-            'checksums.json' => '{}',
+            'checksums.json' => $this->checksums(array(
+                'database/tables.json' => '{}',
+                'database/chunks/wp_posts.part001.sql' => 'CREATE TABLE wp_posts;',
+                'files/index.php' => '<?php echo "site";',
+            )),
             '../wp-config.php' => 'bad',
             'database/tables.json' => '{}',
         ));
@@ -168,7 +202,11 @@ final class ArchiveValidatorTest extends TestCase
     {
         $package = $this->createDirectoryPackage(array(
             'manifest.json' => json_encode(array('project' => 'Super Sheep Copy')),
-            'checksums.json' => '{}',
+            'checksums.json' => $this->checksums(array(
+                'database/tables.json' => '{}',
+                'database/chunks/wp_posts.part001.sql' => 'CREATE TABLE wp_posts;',
+                'files/index.php' => '<?php echo "site";',
+            )),
             'database/tables.json' => '{}',
             'database/chunks/wp_posts.part001.sql' => 'CREATE TABLE wp_posts;',
             'files/index.php' => '<?php echo "site";',
@@ -190,7 +228,11 @@ final class ArchiveValidatorTest extends TestCase
 
         $package = $this->createTarGzPackage(array(
             'manifest.json' => json_encode(array('project' => 'Super Sheep Copy')),
-            'checksums.json' => '{}',
+            'checksums.json' => $this->checksums(array(
+                'database/tables.json' => '{}',
+                'database/chunks/wp_posts.part001.sql' => 'CREATE TABLE wp_posts;',
+                'files/index.php' => '<?php echo "site";',
+            )),
             'database/tables.json' => '{}',
             'database/chunks/wp_posts.part001.sql' => 'CREATE TABLE wp_posts;',
             'files/index.php' => '<?php echo "site";',
@@ -221,6 +263,19 @@ final class ArchiveValidatorTest extends TestCase
         $zip->close();
 
         return $archive;
+    }
+
+    /**
+     * @param array<string,string> $entries
+     */
+    private function checksums(array $entries): string
+    {
+        $checksums = array();
+        foreach ($entries as $path => $contents) {
+            $checksums[$path] = hash('sha256', $contents);
+        }
+
+        return (string) json_encode($checksums);
     }
 
     /**

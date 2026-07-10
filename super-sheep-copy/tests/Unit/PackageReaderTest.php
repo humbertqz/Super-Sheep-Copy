@@ -44,6 +44,25 @@ final class PackageReaderTest extends TestCase
         self::assertNull($reader->read('../wp-config.php'));
     }
 
+    public function testReadersHashSafeEntries(): void
+    {
+        $directory_reader = new DirectoryPackageReader($this->createDirectoryPackage(array('files/a.txt' => 'body')));
+        self::assertSame(hash('sha256', 'body'), $directory_reader->sha256('files/a.txt'));
+        self::assertNull($directory_reader->sha256('../wp-config.php'));
+
+        if (class_exists(ZipArchive::class)) {
+            $zip_reader = new ZipPackageReader($this->createZipPackage(array('files/a.txt' => 'body')));
+            self::assertSame(hash('sha256', 'body'), $zip_reader->sha256('files/a.txt'));
+            self::assertNull($zip_reader->sha256('../wp-config.php'));
+        }
+
+        if (class_exists(PharData::class)) {
+            $tar_reader = new TarGzPackageReader($this->createTarGzPackage(array('files/a.txt' => 'body')));
+            self::assertSame(hash('sha256', 'body'), $tar_reader->sha256('files/a.txt'));
+            self::assertNull($tar_reader->sha256('../wp-config.php'));
+        }
+    }
+
     public function testZipReaderListsReadsAndCopiesEntries(): void
     {
         if (!class_exists(ZipArchive::class)) {
