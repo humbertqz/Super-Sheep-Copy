@@ -110,10 +110,8 @@ final class InstallerBootstrapTest extends TestCase
         self::assertStringContainsString('is-working', $html);
         self::assertStringContainsString('document.addEventListener("submit"', $html);
         self::assertStringContainsString('showInstallerWorkingState(form);', $html);
-        self::assertStringContainsString('event.preventDefault();', $html);
-        self::assertStringContainsString('window.requestAnimationFrame', $html);
-        self::assertStringContainsString('window.setTimeout(submit,250);', $html);
-        self::assertStringContainsString('window.HTMLFormElement.prototype.submit.call(form);', $html);
+        self::assertStringNotContainsString('event.preventDefault();', $html);
+        self::assertStringNotContainsString('window.HTMLFormElement.prototype.submit.call(form);', $html);
         self::assertStringNotContainsString('document.addEventListener("click"', $html);
     }
 
