@@ -39,7 +39,37 @@ final class IncrementalArchiveValidator
             $payload['validation_errors'][] = 'No backup content entries were found.';
         }
 
+        $required = array('manifest.json', 'checksums.json', 'database/tables.json');
+        foreach ($required as $required_entry) {
+            if (!in_array($required_entry, $entries, true)) {
+                $payload['validation_errors'][] = 'Missing ' . $required_entry . '.';
+            }
+        }
+        if ($this->firstEntryWithPrefix($entries, 'database/chunks/') === '') {
+            $payload['validation_errors'][] = 'Missing database/chunks/*.sql.';
+        }
+        if ($this->firstEntryWithPrefix($entries, 'files/') === '') {
+            $payload['validation_errors'][] = 'Missing files/ entries.';
+        }
+        $manifest_json = $reader->read('manifest.json');
+        $manifest = is_string($manifest_json) ? json_decode($manifest_json, true) : null;
+        if (!is_array($manifest) || ($manifest['project'] ?? null) !== 'Super Sheep Copy') {
+            $payload['validation_errors'][] = 'Archive manifest is invalid.';
+        }
+
         return $payload;
+    }
+
+    /** @param string[] $entries */
+    private function firstEntryWithPrefix(array $entries, string $prefix): string
+    {
+        foreach ($entries as $entry) {
+            if (strpos($entry, $prefix) === 0) {
+                return $entry;
+            }
+        }
+
+        return '';
     }
 
     /**
