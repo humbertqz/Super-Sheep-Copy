@@ -47,7 +47,11 @@ final class InstallerArchiveValidatorTest extends TestCase
         $validator = new \SuperSheepCopyInstaller\ArchiveValidator();
         $result = $validator->validatePackage($this->archive(array(
             'manifest.json' => json_encode(array('project' => 'Super Sheep Copy', 'source_site_url' => 'https://source.example')),
-            'checksums.json' => '{}',
+            'checksums.json' => $this->checksums(array(
+                'database/tables.json' => '{}',
+                'database/chunks/wp_posts.part001.sql' => 'CREATE TABLE wp_posts;',
+                'files/index.php' => '<?php echo "site";',
+            )),
             'database/tables.json' => '{}',
             'database/chunks/wp_posts.part001.sql' => 'CREATE TABLE wp_posts;',
             'files/index.php' => '<?php echo "site";',
@@ -59,12 +63,38 @@ final class InstallerArchiveValidatorTest extends TestCase
         self::assertSame(2, $result->databaseEntryCount());
     }
 
+    public function testChecksumMismatchFails(): void
+    {
+        if (!class_exists(ZipArchive::class)) {
+            self::markTestSkipped('ZipArchive is not available.');
+        }
+
+        $result = (new \SuperSheepCopyInstaller\ArchiveValidator())->validatePackage($this->archive(array(
+            'manifest.json' => json_encode(array('project' => 'Super Sheep Copy')),
+            'checksums.json' => json_encode(array(
+                'database/tables.json' => hash('sha256', '{}'),
+                'database/chunks/wp_posts.part001.sql' => hash('sha256', 'CREATE TABLE wp_posts;'),
+                'files/index.php' => hash('sha256', 'original'),
+            )),
+            'database/tables.json' => '{}',
+            'database/chunks/wp_posts.part001.sql' => 'CREATE TABLE wp_posts;',
+            'files/index.php' => 'changed',
+        )));
+
+        self::assertFalse($result->isValid());
+        self::assertContains('Checksum mismatch for archive entry: files/index.php', $result->errors());
+    }
+
     public function testValidDirectoryPackagePasses(): void
     {
         $validator = new \SuperSheepCopyInstaller\ArchiveValidator();
         $result = $validator->validatePackage($this->directoryPackage(array(
             'manifest.json' => json_encode(array('project' => 'Super Sheep Copy', 'source_site_url' => 'https://source.example')),
-            'checksums.json' => '{}',
+            'checksums.json' => $this->checksums(array(
+                'database/tables.json' => '{}',
+                'database/chunks/wp_posts.part001.sql' => 'CREATE TABLE wp_posts;',
+                'files/index.php' => '<?php echo "site";',
+            )),
             'database/tables.json' => '{}',
             'database/chunks/wp_posts.part001.sql' => 'CREATE TABLE wp_posts;',
             'files/index.php' => '<?php echo "site";',
@@ -123,6 +153,19 @@ final class InstallerArchiveValidatorTest extends TestCase
         $zip->close();
 
         return $path;
+    }
+
+    /**
+     * @param array<string,string> $entries
+     */
+    private function checksums(array $entries): string
+    {
+        $checksums = array();
+        foreach ($entries as $path => $contents) {
+            $checksums[$path] = hash('sha256', $contents);
+        }
+
+        return (string) json_encode($checksums);
     }
 
     /**

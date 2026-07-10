@@ -55,6 +55,22 @@ final class TarGzPackageReader implements PackageReaderInterface
         return is_string($contents) ? $contents : null;
     }
 
+    public function sha256(string $entry_path): ?string
+    {
+        if (!PackagePathGuard::isSafe($entry_path)) {
+            return null;
+        }
+
+        $path = 'phar://' . $this->package_path . '/' . str_replace('\\', '/', $entry_path);
+        if (!is_readable($path)) {
+            return null;
+        }
+
+        $checksum = hash_file('sha256', $path);
+
+        return is_string($checksum) ? $checksum : null;
+    }
+
     public function copyToFile(string $entry_path, string $destination_path): bool
     {
         if (!PackagePathGuard::isSafe($entry_path)) {
