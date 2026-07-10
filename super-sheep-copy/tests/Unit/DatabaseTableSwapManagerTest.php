@@ -82,6 +82,35 @@ final class DatabaseTableSwapManagerTest extends TestCase
         self::assertSame('planned', $config['database_url_replacement_plan']['status']);
     }
 
+    public function testBoundsLongRollbackTableNameToMysqlIdentifierLimit(): void
+    {
+        $destination_table = 'rgt_woocommerce_downloadable_product_permissions';
+        $staging_table = $this->expectedBoundedTableName('ssc_tmp_', 'restore-123', $destination_table);
+        file_put_contents($this->engine_dir . '/config.php', "<?php\n\nreturn array();\n");
+        $manager = $this->manager(array($destination_table => true, $staging_table => true));
+
+        $result = $manager->swap($this->engine_dir, array(
+            'restore_confirmed' => true,
+            'rollback_prepared' => true,
+            'rollback_database_dump' => 'rollback/db.sql',
+            'database_import_staged' => true,
+            'database_import_staging_tables' => array($destination_table => $staging_table),
+            'restore_job_id' => 'restore-123',
+            'source_site_url' => 'https://source.example',
+            'source_home_url' => 'https://source.example',
+        ), array('HTTP_HOST' => 'destination.example', 'HTTPS' => 'on'));
+
+        $config = require $this->engine_dir . '/config.php';
+        $rollback_table = $config['database_swap_backup_tables'][$destination_table];
+
+        self::assertTrue($result['swapped']);
+        self::assertSame(64, strlen($rollback_table));
+        self::assertSame($this->expectedBoundedTableName('ssc_old_', 'restore-123', $destination_table), $rollback_table);
+        self::assertSame(array(
+            'RENAME TABLE `' . $destination_table . '` TO `' . $rollback_table . '`, `' . $staging_table . '` TO `' . $destination_table . '`',
+        ), $result['sql']);
+    }
+
     public function testUrlPlanUsesSubdirectoryDestinationFromInstallerPath(): void
     {
         file_put_contents($this->engine_dir . '/config.php', "<?php\n\nreturn array();\n");
@@ -290,6 +319,14 @@ final class DatabaseTableSwapManagerTest extends TestCase
             new \SuperSheepCopyInstaller\DatabaseUrlReplacementPlanBuilder(),
             $executor === null ? new FakeSwapExecutor() : $executor
         );
+    }
+
+    private function expectedBoundedTableName(string $prefix, string $restore_job_id, string $source): string
+    {
+        $base = $prefix . substr(hash('sha256', $restore_job_id), 0, 8) . '_';
+        $suffix = '_' . substr(hash('sha256', $source), 0, 8);
+
+        return $base . substr($source, 0, 64 - strlen($base) - strlen($suffix)) . $suffix;
     }
 
     private function removeDirectory(string $path): void

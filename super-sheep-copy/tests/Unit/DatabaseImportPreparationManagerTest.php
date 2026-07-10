@@ -193,6 +193,23 @@ final class DatabaseImportPreparationManagerTest extends TestCase
         self::assertArrayNotHasKey('database_import_cursor', $updated);
     }
 
+    public function testBoundsLongStagingTableNameToMysqlIdentifierLimit(): void
+    {
+        $source_table = 'rgt_woocommerce_downloadable_product_permissions';
+        $this->writeArchive($source_table);
+        $config = $this->readyConfig();
+        $config['restore_job_id'] = 'restore-123';
+        $this->writeConfig($config);
+
+        $result = $this->manager()->stage($this->engine, $config, array());
+        $updated = require $this->engine . '/config.php';
+        $staging_table = $updated['database_import_staging_tables'][$source_table];
+
+        self::assertTrue($result['staged']);
+        self::assertSame(64, strlen($staging_table));
+        self::assertSame($this->expectedBoundedTableName('ssc_tmp_', 'restore-123', $source_table), $staging_table);
+    }
+
     public function testPersistsImportCursorWhenDatabaseImportIsStillRunning(): void
     {
         $config = $this->readyConfig();
@@ -236,17 +253,26 @@ final class DatabaseImportPreparationManagerTest extends TestCase
         );
     }
 
-    private function writeArchive(): void
+    private function writeArchive(string $table_name = 'wp_posts'): void
     {
+        $chunk_name = $table_name . '.part001.sql';
         $zip = new ZipArchive();
         self::assertTrue($zip->open($this->archive, ZipArchive::CREATE | ZipArchive::OVERWRITE));
         $zip->addFromString('database/tables.json', json_encode(array(
             'format_version' => '1',
             'table_count' => 1,
-            'tables' => array(array('name' => 'wp_posts', 'chunks' => array('wp_posts.part001.sql'))),
+            'tables' => array(array('name' => $table_name, 'chunks' => array($chunk_name))),
         )));
-        $zip->addFromString('database/chunks/wp_posts.part001.sql', 'CREATE TABLE `wp_posts` (`ID` bigint);');
+        $zip->addFromString('database/chunks/' . $chunk_name, 'CREATE TABLE `' . $table_name . '` (`ID` bigint);');
         $zip->close();
+    }
+
+    private function expectedBoundedTableName(string $prefix, string $restore_job_id, string $source): string
+    {
+        $base = $prefix . substr(hash('sha256', $restore_job_id), 0, 8) . '_';
+        $suffix = '_' . substr(hash('sha256', $source), 0, 8);
+
+        return $base . substr($source, 0, 64 - strlen($base) - strlen($suffix)) . $suffix;
     }
 
     /**
@@ -309,8 +335,15 @@ final class FakeDatabaseChunkImporter extends \SuperSheepCopyInstaller\DatabaseC
      */
     public function import(array $credentials, array $tables, array $chunks, array $table_map, \SuperSheepCopyInstaller\SqlTableNameRewriter $rewriter): array
     {
-        \PHPUnit\Framework\Assert::assertSame(array('wp_posts'), array_keys($table_map));
-        \PHPUnit\Framework\Assert::assertStringStartsWith('ssc_tmp_', $table_map['wp_posts']);
+        unset($credentials, $chunks, $rewriter);
+
+        $table_names = array();
+        foreach ($tables as $table) {
+            $table_names[] = $table['name'];
+            \PHPUnit\Framework\Assert::assertStringStartsWith('ssc_tmp_', $table_map[$table['name']]);
+        }
+
+        \PHPUnit\Framework\Assert::assertSame($table_names, array_keys($table_map));
 
         return array('imported' => true, 'table_count' => 1, 'chunk_count' => 1, 'statement_count' => 2, 'warnings' => array());
     }

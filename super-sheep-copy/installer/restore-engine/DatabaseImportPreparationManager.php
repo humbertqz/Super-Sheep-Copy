@@ -7,6 +7,8 @@ namespace SuperSheepCopyInstaller;
 
 final class DatabaseImportPreparationManager
 {
+    private const MYSQL_IDENTIFIER_MAX_LENGTH = 64;
+
     private WpConfigReader $wp_config;
     private DatabaseConnectionTester $connection_tester;
     private DatabaseImportManifestReader $manifest_reader;
@@ -141,10 +143,23 @@ final class DatabaseImportPreparationManager
         foreach ($tables as $table) {
             $source = $table['name'];
             $sanitized = preg_replace('/[^A-Za-z0-9_]/', '_', $source);
-            $table_map[$source] = 'ssc_tmp_' . $hash . '_' . ($sanitized === null ? '' : $sanitized);
+            $table_map[$source] = $this->boundedTemporaryTableName('ssc_tmp_', $hash, $source, $sanitized === null ? '' : $sanitized);
         }
 
         return $table_map;
+    }
+
+    private function boundedTemporaryTableName(string $prefix, string $restore_hash, string $source, string $sanitized_source): string
+    {
+        $base = $prefix . $restore_hash . '_';
+        $available = self::MYSQL_IDENTIFIER_MAX_LENGTH - strlen($base);
+        if (strlen($sanitized_source) <= $available) {
+            return $base . $sanitized_source;
+        }
+
+        $suffix = '_' . substr(hash('sha256', $source), 0, 8);
+
+        return $base . substr($sanitized_source, 0, $available - strlen($suffix)) . $suffix;
     }
 
     /**

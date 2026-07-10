@@ -7,6 +7,8 @@ namespace SuperSheepCopyInstaller;
 
 final class DatabaseTableSwapManager
 {
+    private const MYSQL_IDENTIFIER_MAX_LENGTH = 64;
+
     private WpConfigReader $wp_config;
     private DatabaseConnectionTester $connection_tester;
     private DatabaseTableInspector $table_inspector;
@@ -231,10 +233,23 @@ final class DatabaseTableSwapManager
                 continue;
             }
 
-            $backup_map[$table] = 'ssc_old_' . $hash . '_' . $this->sanitizeIdentifier($table);
+            $backup_map[$table] = $this->boundedTemporaryTableName('ssc_old_', $hash, $table, $this->sanitizeIdentifier($table));
         }
 
         return $backup_map;
+    }
+
+    private function boundedTemporaryTableName(string $prefix, string $restore_hash, string $source, string $sanitized_source): string
+    {
+        $base = $prefix . $restore_hash . '_';
+        $available = self::MYSQL_IDENTIFIER_MAX_LENGTH - strlen($base);
+        if (strlen($sanitized_source) <= $available) {
+            return $base . $sanitized_source;
+        }
+
+        $suffix = '_' . substr(hash('sha256', $source), 0, 8);
+
+        return $base . substr($sanitized_source, 0, $available - strlen($suffix)) . $suffix;
     }
 
     /**
