@@ -277,8 +277,11 @@ final class BackupStepRunnerTest extends TestCase
         self::assertSame(3, $job->payload()['archive_index']);
 
         $job = $runner->runStep($job);
-        self::assertSame(Job::COMPLETED, $job->state(), (string) ($job->payload()['message'] ?? ''));
+        self::assertSame(Job::VALIDATING_BACKUP, $job->state(), (string) ($job->payload()['message'] ?? ''));
         self::assertSame(4, $job->payload()['archive_index']);
+
+        $job = $runner->runStep($job);
+        self::assertSame(Job::COMPLETED, $job->state(), (string) ($job->payload()['message'] ?? ''));
         self::assertSame('valid', $job->payload()['archive_validation_status']);
     }
 
@@ -491,6 +494,7 @@ final class BackupStepRunnerPackager implements BackupArchiveStepPackagerInterfa
         $payload['archive_size'] = 3;
         $payload['archive_database_file_count'] = 1;
         $payload['archive_complete'] = true;
+        $payload['archive_validation_status'] = 'valid';
         $payload['message'] = 'Backup completed.';
 
         return $payload;

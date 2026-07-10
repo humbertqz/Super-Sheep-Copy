@@ -64,8 +64,6 @@ final class BackupArchiveStepPackagerTest extends TestCase
         $payload = $packager->packageStep('backup-123', $this->root . '/working', $this->root . '/working/database', $site_files, $this->metadata(), $payload);
 
         self::assertTrue($payload['archive_complete']);
-        self::assertSame('valid', $payload['archive_validation_status']);
-        self::assertSame(array(), $payload['archive_validation_errors']);
         self::assertGreaterThan(0, $payload['archive_size']);
         self::assertSame(2, $payload['archive_site_file_count']);
         self::assertSame(2, $payload['archive_database_file_count']);
@@ -112,8 +110,6 @@ final class BackupArchiveStepPackagerTest extends TestCase
         $payload = $packager->packageStep('backup-123', $this->root . '/working', $this->root . '/working/database', $site_files, $this->metadata(), $payload);
 
         self::assertTrue($payload['archive_complete']);
-        self::assertSame('valid', $payload['archive_validation_status']);
-        self::assertSame(array(), $payload['archive_validation_errors']);
         self::assertSame('directory', $payload['package_format']);
         self::assertSame('', $payload['package_extension']);
         self::assertFileExists($this->root . '/working/backup-123/manifest.json');
@@ -162,8 +158,6 @@ final class BackupArchiveStepPackagerTest extends TestCase
         $payload = $packager->packageStep('backup-123', $this->root . '/working', $this->root . '/working/database', $site_files, $this->metadata(), $payload);
 
         self::assertTrue($payload['archive_complete']);
-        self::assertSame('valid', $payload['archive_validation_status']);
-        self::assertSame(array(), $payload['archive_validation_errors']);
         self::assertFileExists($this->root . '/working/backup-123.tar.gz');
         self::assertDirectoryDoesNotExist($this->root . '/working/backup-123.tar.gz.staging');
 

@@ -103,7 +103,6 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
             if ((isset($payload['package_format']) ? (string) $payload['package_format'] : '') === 'tar.gz') {
                 $payload = $this->finalizeTarGzPackage($archive_path, $payload);
             }
-            $payload = $this->validateArchive($archive_path, $payload);
             $payload['archive_complete'] = true;
             $payload['message'] = 'Backup completed.';
 

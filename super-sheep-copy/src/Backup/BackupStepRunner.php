@@ -27,6 +27,7 @@ final class BackupStepRunner implements BackupStepRunnerInterface
     private BackupArchiveStepPackagerInterface $packager;
     private int $file_scan_batch_size;
     private AdaptiveBackupLimits $adaptive_limits;
+    private IncrementalArchiveValidator $archive_validator;
 
     public function __construct(
         JobRepositoryInterface $jobs,
@@ -47,6 +48,7 @@ final class BackupStepRunner implements BackupStepRunnerInterface
         $this->packager = $packager;
         $this->file_scan_batch_size = max(1, $file_scan_batch_size);
         $this->adaptive_limits = new AdaptiveBackupLimits();
+        $this->archive_validator = new IncrementalArchiveValidator();
     }
 
     public function runStep(Job $job): Job
@@ -66,6 +68,10 @@ final class BackupStepRunner implements BackupStepRunnerInterface
 
             if ($job->state() === Job::PACKAGING_ARCHIVE) {
                 return $this->packageArchive($job);
+            }
+
+            if ($job->state() === Job::VALIDATING_BACKUP) {
+                return $this->validateArchiveStep($job);
             }
 
             return $job;
@@ -215,13 +221,48 @@ final class BackupStepRunner implements BackupStepRunnerInterface
             return $this->save($job->id(), Job::PACKAGING_ARCHIVE, $payload);
         }
 
+        if (isset($payload['archive_validation_status']) && $payload['archive_validation_status'] === 'valid') {
+            return $this->completeBackup($job->id(), $payload);
+        }
+
         $payload['database_file_count'] = isset($payload['archive_database_file_count']) ? (int) $payload['archive_database_file_count'] : 0;
+        $payload = $this->archive_validator->prepare($this->stringPayload($payload, 'archive_path'), $payload);
+        $payload['message'] = 'Backup archive ready. Starting validation.';
+
+        return $this->save($job->id(), Job::VALIDATING_BACKUP, $payload);
+    }
+
+    private function validateArchiveStep(Job $job): Job
+    {
+        $payload = $job->payload();
+        $payload = $this->archive_validator->step($this->stringPayload($payload, 'archive_path'), $payload, 10.0);
+        if (!$payload['validation_complete']) {
+            return $this->save($job->id(), Job::VALIDATING_BACKUP, $payload);
+        }
+
+        if (!empty($payload['validation_errors'])) {
+            $payload['archive_validation_status'] = 'invalid';
+            $payload['archive_validation_errors'] = array_values(array_unique((array) $payload['validation_errors']));
+            $payload['message'] = 'Backup archive validation failed.';
+
+            return $this->save($job->id(), Job::FAILED, $payload);
+        }
+
+        $payload['archive_validation_status'] = 'valid';
+        $payload['archive_validation_errors'] = array();
+        $payload['message'] = 'Backup validation completed.';
+        $payload['archive_complete'] = true;
+        return $this->completeBackup($job->id(), $payload);
+    }
+
+    /** @param array<string,mixed> $payload */
+    private function completeBackup(string $job_id, array $payload): Job
+    {
         $completed_at = time();
         $started_at = isset($payload['backup_started_at']) && is_numeric($payload['backup_started_at']) ? (int) $payload['backup_started_at'] : $completed_at;
         $payload['backup_completed_at'] = $completed_at;
         $payload['backup_total_seconds'] = max(0, $completed_at - $started_at);
-
-        $completed = $this->save($job->id(), Job::COMPLETED, $payload);
+        $completed = $this->save($job_id, Job::COMPLETED, $payload);
         $this->cleanSuccessfulBackupRetention($payload);
 
         return $completed;

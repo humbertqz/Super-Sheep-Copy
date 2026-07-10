@@ -12,6 +12,7 @@ final class Job
     public const EXPORTING_DATABASE = 'exporting_database';
     public const ARCHIVING_FILES = 'archiving_files';
     public const PACKAGING_ARCHIVE = 'packaging_archive';
+    public const VALIDATING_BACKUP = 'validating_backup';
     public const FINALIZING_BACKUP = 'finalizing_backup';
     public const VALIDATING_RESTORE = 'validating_restore';
     public const EXTRACTING_RESTORE = 'extracting_restore';
