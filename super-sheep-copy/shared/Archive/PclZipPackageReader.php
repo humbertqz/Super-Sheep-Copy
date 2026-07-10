@@ -50,6 +50,13 @@ final class PclZipPackageReader implements PackageReaderInterface
         return is_string($contents[0]['content']) ? $contents[0]['content'] : null;
     }
 
+    public function sha256(string $entry_path): ?string
+    {
+        $contents = $this->read($entry_path);
+
+        return $contents === null ? null : hash('sha256', $contents);
+    }
+
     public function copyToFile(string $entry_path, string $destination_path): bool
     {
         $contents = $this->read($entry_path);

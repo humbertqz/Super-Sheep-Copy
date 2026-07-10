@@ -48,6 +48,37 @@ final class ZipPackageReader implements PackageReaderInterface
         return is_string($contents) ? $contents : null;
     }
 
+    public function sha256(string $entry_path): ?string
+    {
+        if (!PackagePathGuard::isSafe($entry_path)) {
+            return null;
+        }
+
+        $zip = $this->open();
+        $stream = $zip->getStream($entry_path);
+        if (!is_resource($stream)) {
+            $zip->close();
+
+            return null;
+        }
+
+        $context = hash_init('sha256');
+        while (!feof($stream)) {
+            $chunk = fread($stream, 8192);
+            if ($chunk === false) {
+                fclose($stream);
+                $zip->close();
+
+                return null;
+            }
+            hash_update($context, $chunk);
+        }
+        fclose($stream);
+        $zip->close();
+
+        return hash_final($context);
+    }
+
     public function copyToFile(string $entry_path, string $destination_path): bool
     {
         if (!PackagePathGuard::isSafe($entry_path)) {
