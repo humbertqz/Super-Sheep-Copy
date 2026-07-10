@@ -11,10 +11,18 @@ use ZipArchive;
 final class ZipPackageReader implements PackageReaderInterface
 {
     private string $package_path;
+    private ?ZipArchive $hash_zip = null;
 
     public function __construct(string $package_path)
     {
         $this->package_path = $package_path;
+    }
+
+    public function __destruct()
+    {
+        if ($this->hash_zip instanceof ZipArchive) {
+            $this->hash_zip->close();
+        }
     }
 
     public function entries(): array
@@ -54,11 +62,9 @@ final class ZipPackageReader implements PackageReaderInterface
             return null;
         }
 
-        $zip = $this->open();
+        $zip = $this->hashArchive();
         $stream = $zip->getStream($entry_path);
         if (!is_resource($stream)) {
-            $zip->close();
-
             return null;
         }
 
@@ -67,14 +73,12 @@ final class ZipPackageReader implements PackageReaderInterface
             $chunk = fread($stream, 8192);
             if ($chunk === false) {
                 fclose($stream);
-                $zip->close();
 
                 return null;
             }
             hash_update($context, $chunk);
         }
         fclose($stream);
-        $zip->close();
 
         return hash_final($context);
     }
@@ -125,5 +129,14 @@ final class ZipPackageReader implements PackageReaderInterface
         }
 
         return $zip;
+    }
+
+    private function hashArchive(): ZipArchive
+    {
+        if (!$this->hash_zip instanceof ZipArchive) {
+            $this->hash_zip = $this->open();
+        }
+
+        return $this->hash_zip;
     }
 }
