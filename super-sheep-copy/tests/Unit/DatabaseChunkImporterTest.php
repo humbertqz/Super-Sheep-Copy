@@ -97,6 +97,60 @@ final class DatabaseChunkImporterTest extends TestCase
         self::assertTrue($connection->closed);
     }
 
+    public function testImportStepReturnsCursorWhenBudgetIsExhaustedAndCanResume(): void
+    {
+        $connection = new DatabaseChunkImporterFakeConnection();
+        $connection->query_delay_microseconds = 120000;
+        $importer = new class($connection) extends \SuperSheepCopyInstaller\DatabaseChunkImporter {
+            private DatabaseChunkImporterFakeConnection $connection;
+
+            public function __construct(DatabaseChunkImporterFakeConnection $connection)
+            {
+                $this->connection = $connection;
+            }
+
+            protected function connect(array $credentials)
+            {
+                return $this->connection;
+            }
+        };
+        $tables = array(array('name' => 'wp_posts', 'chunks' => array('wp_posts.part001.sql')));
+        $chunks = array('wp_posts.part001.sql' => "DROP TABLE IF EXISTS `wp_posts`;\nCREATE TABLE `wp_posts` (`ID` bigint);");
+        $table_map = array('wp_posts' => 'ssc_tmp_hash_wp_posts');
+
+        $first = $importer->importStep(
+            array('host' => 'localhost', 'user' => 'root', 'password' => '', 'name' => 'wordpress', 'charset' => 'utf8mb4'),
+            $tables,
+            $chunks,
+            $table_map,
+            new \SuperSheepCopyInstaller\SqlTableNameRewriter(),
+            array(),
+            0.1
+        );
+        $connection->query_delay_microseconds = 0;
+        $second = $importer->importStep(
+            array('host' => 'localhost', 'user' => 'root', 'password' => '', 'name' => 'wordpress', 'charset' => 'utf8mb4'),
+            $tables,
+            $chunks,
+            $table_map,
+            new \SuperSheepCopyInstaller\SqlTableNameRewriter(),
+            $first['cursor'],
+            0.1
+        );
+
+        self::assertFalse($first['imported']);
+        self::assertTrue($first['in_progress']);
+        self::assertSame(array('table_index' => 0, 'chunk_index' => 0, 'statement_index' => 1), $first['cursor']);
+        self::assertSame(1, $first['statement_count']);
+        self::assertTrue($second['imported']);
+        self::assertFalse($second['in_progress']);
+        self::assertSame(1, $second['statement_count']);
+        self::assertSame(array(
+            'DROP TABLE IF EXISTS `ssc_tmp_hash_wp_posts`',
+            'CREATE TABLE `ssc_tmp_hash_wp_posts` (`ID` bigint)',
+        ), $connection->statements);
+    }
+
     public function testNormalizesCreateTableCharsetAndCollationToDestination(): void
     {
         $connection = new DatabaseChunkImporterFakeConnection();
@@ -256,6 +310,7 @@ final class DatabaseChunkImporterFakeConnection
     public int $errno = 0;
     public string $error = '';
     public string $charset = '';
+    public int $query_delay_microseconds = 0;
 
     /** @var list<string> */
     public array $events = array();
@@ -270,6 +325,9 @@ final class DatabaseChunkImporterFakeConnection
 
     public function query(string $statement): bool
     {
+        if ($this->query_delay_microseconds > 0) {
+            usleep($this->query_delay_microseconds);
+        }
         $this->statements[] = $statement;
         $this->events[] = 'query';
 

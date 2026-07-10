@@ -153,6 +153,9 @@ final class Bootstrap
             if ($import_result['staged']) {
                 $config = self::loadConfig($engine_dir);
                 $database_import_message = 'Database import staged.';
+            } elseif (!empty($import_result['in_progress'])) {
+                $config = self::loadConfig($engine_dir);
+                $database_import_message = 'Database import still running. Continue to process the next batch.';
             } else {
                 $database_import_message = isset($import_result['warnings'][0]) ? $import_result['warnings'][0] : 'Database import staging failed.';
             }
@@ -322,11 +325,16 @@ final class Bootstrap
                 . esc_html((string) ($config['database_import_table_count'] ?? 0)) . ' tables, '
                 . esc_html((string) ($config['database_import_chunk_count'] ?? 0)) . ' chunks imported. Continue to table swap.</div>';
         } else {
-            echo '<div class="status warning">Import backup database chunks into isolated staging tables. Destination tables will not be replaced.</div>';
+            if (!empty($config['database_import_in_progress'])) {
+                echo '<div class="status warning">Database import is in progress. '
+                    . esc_html((string) ($config['database_import_statement_count'] ?? 0)) . ' statements processed so far.</div>';
+            } else {
+                echo '<div class="status warning">Import backup database chunks into isolated staging tables. Destination tables will not be replaced.</div>';
+            }
             echo '<form class="ssc-installer-action" method="post" data-ssc-installer-action>';
             echo '<input type="hidden" name="token" value="' . esc_attr($token) . '">';
             echo '<input type="hidden" name="stage_database_import" value="1">';
-            echo '<p><button type="submit">Import Database to Staging</button></p>';
+            echo '<p><button type="submit">' . (!empty($config['database_import_in_progress']) ? 'Continue Database Import' : 'Import Database to Staging') . '</button></p>';
             // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- loadingIndicator() returns static trusted installer markup.
             echo self::loadingIndicator();
             echo '</form>';

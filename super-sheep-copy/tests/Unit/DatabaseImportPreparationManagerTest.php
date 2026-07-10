@@ -9,6 +9,12 @@ use ZipArchive;
 
 require_once dirname(__DIR__, 2) . '/installer/restore-engine/WpConfigReader.php';
 require_once dirname(__DIR__, 2) . '/installer/restore-engine/DatabaseConnectionTester.php';
+require_once dirname(__DIR__, 2) . '/installer/restore-engine/PackagePathGuard.php';
+require_once dirname(__DIR__, 2) . '/installer/restore-engine/PackageReaderInterface.php';
+require_once dirname(__DIR__, 2) . '/installer/restore-engine/ZipPackageReader.php';
+require_once dirname(__DIR__, 2) . '/installer/restore-engine/TarGzPackageReader.php';
+require_once dirname(__DIR__, 2) . '/installer/restore-engine/DirectoryPackageReader.php';
+require_once dirname(__DIR__, 2) . '/installer/restore-engine/PackageReaderFactory.php';
 require_once dirname(__DIR__, 2) . '/installer/restore-engine/DatabaseImportManifestReader.php';
 require_once dirname(__DIR__, 2) . '/installer/restore-engine/SqlTableNameRewriter.php';
 require_once dirname(__DIR__, 2) . '/installer/restore-engine/DatabaseChunkImporter.php';
@@ -161,6 +167,10 @@ final class DatabaseImportPreparationManagerTest extends TestCase
         $config = $this->readyConfig();
         $config['restore_job_id'] = 'restore-123';
         $config['existing_key'] = 'preserved';
+        $config['database_import_in_progress'] = true;
+        $config['database_import_cursor'] = array('table_index' => 0, 'chunk_index' => 0, 'statement_index' => 1);
+        $config['database_import_chunk_count'] = 0;
+        $config['database_import_statement_count'] = 1;
         $this->writeConfig($config);
 
         $result = $this->manager()->stage($this->engine, $config, array('HTTP_HOST' => 'destination.example'));
@@ -179,6 +189,25 @@ final class DatabaseImportPreparationManagerTest extends TestCase
         self::assertSame(2, $updated['database_import_statement_count']);
         self::assertSame('ssc_tmp_' . substr(hash('sha256', 'restore-123'), 0, 8) . '_wp_posts', $updated['database_import_staging_tables']['wp_posts']);
         self::assertStringNotContainsString('secret', json_encode($updated['database_import_staging_tables']) ?: '');
+        self::assertFalse($updated['database_import_in_progress']);
+        self::assertArrayNotHasKey('database_import_cursor', $updated);
+    }
+
+    public function testPersistsImportCursorWhenDatabaseImportIsStillRunning(): void
+    {
+        $config = $this->readyConfig();
+        $this->writeConfig($config);
+
+        $result = $this->manager(null, new FakeInProgressDatabaseChunkImporter())->stage($this->engine, $config, array());
+        $updated = require $this->engine . '/config.php';
+
+        self::assertFalse($result['staged']);
+        self::assertTrue($result['in_progress']);
+        self::assertSame(1, $result['statement_count']);
+        self::assertSame(array(), $result['warnings']);
+        self::assertTrue($updated['database_import_in_progress']);
+        self::assertSame(array('table_index' => 0, 'chunk_index' => 0, 'statement_index' => 1), $updated['database_import_cursor']);
+        self::assertArrayNotHasKey('database_import_staged', $updated);
     }
 
     private function manager(?\SuperSheepCopyInstaller\DatabaseConnectionTester $connection_tester = null, ?\SuperSheepCopyInstaller\DatabaseChunkImporter $importer = null, ?\SuperSheepCopyInstaller\DatabaseTableInspector $table_inspector = null): \SuperSheepCopyInstaller\DatabaseImportPreparationManager
@@ -285,6 +314,32 @@ final class FakeDatabaseChunkImporter extends \SuperSheepCopyInstaller\DatabaseC
 
         return array('imported' => true, 'table_count' => 1, 'chunk_count' => 1, 'statement_count' => 2, 'warnings' => array());
     }
+
+    /**
+     * @param array<string,mixed> $credentials
+     * @param list<array{name:string,chunks:list<string>}> $tables
+     * @param array<string,string> $chunks
+     * @param array<string,string> $table_map
+     * @param array<string,mixed> $cursor
+     * @return array{imported:bool,in_progress:bool,cursor:array<string,mixed>,table_count:int,chunk_count:int,statement_count:int,warnings:list<string>}
+     */
+    public function importStep(array $credentials, array $tables, array $chunks, array $table_map, \SuperSheepCopyInstaller\SqlTableNameRewriter $rewriter, array $cursor = array(), float $budget_seconds = 10.0): array
+    {
+        unset($budget_seconds);
+
+        $result = $this->import($credentials, $tables, $chunks, $table_map, $rewriter);
+        $statement_count = $cursor === array() ? $result['statement_count'] : 1;
+
+        return array(
+            'imported' => $result['imported'],
+            'in_progress' => false,
+            'cursor' => $cursor,
+            'table_count' => $result['table_count'],
+            'chunk_count' => $result['chunk_count'],
+            'statement_count' => $statement_count,
+            'warnings' => $result['warnings'],
+        );
+    }
 }
 
 final class FakeStagedImportTableInspector extends \SuperSheepCopyInstaller\DatabaseTableInspector
@@ -319,5 +374,56 @@ final class FakeFailingDatabaseChunkImporter extends \SuperSheepCopyInstaller\Da
     public function import(array $credentials, array $tables, array $chunks, array $table_map, \SuperSheepCopyInstaller\SqlTableNameRewriter $rewriter): array
     {
         return array('imported' => false, 'table_count' => 1, 'chunk_count' => 0, 'statement_count' => 0, 'warnings' => array('Import failed.'));
+    }
+
+    /**
+     * @param array<string,mixed> $credentials
+     * @param list<array{name:string,chunks:list<string>}> $tables
+     * @param array<string,string> $chunks
+     * @param array<string,string> $table_map
+     * @param array<string,mixed> $cursor
+     * @return array{imported:bool,in_progress:bool,cursor:array<string,mixed>,table_count:int,chunk_count:int,statement_count:int,warnings:list<string>}
+     */
+    public function importStep(array $credentials, array $tables, array $chunks, array $table_map, \SuperSheepCopyInstaller\SqlTableNameRewriter $rewriter, array $cursor = array(), float $budget_seconds = 10.0): array
+    {
+        unset($budget_seconds);
+
+        $result = $this->import($credentials, $tables, $chunks, $table_map, $rewriter);
+
+        return array(
+            'imported' => $result['imported'],
+            'in_progress' => false,
+            'cursor' => $cursor,
+            'table_count' => $result['table_count'],
+            'chunk_count' => $result['chunk_count'],
+            'statement_count' => $result['statement_count'],
+            'warnings' => $result['warnings'],
+        );
+    }
+}
+
+final class FakeInProgressDatabaseChunkImporter extends \SuperSheepCopyInstaller\DatabaseChunkImporter
+{
+    /**
+     * @param array<string,mixed> $credentials
+     * @param list<array{name:string,chunks:list<string>}> $tables
+     * @param array<string,string> $chunks
+     * @param array<string,string> $table_map
+     * @param array<string,mixed> $cursor
+     * @return array{imported:bool,in_progress:bool,cursor:array<string,mixed>,table_count:int,chunk_count:int,statement_count:int,warnings:list<string>}
+     */
+    public function importStep(array $credentials, array $tables, array $chunks, array $table_map, \SuperSheepCopyInstaller\SqlTableNameRewriter $rewriter, array $cursor = array(), float $budget_seconds = 10.0): array
+    {
+        unset($credentials, $tables, $chunks, $table_map, $rewriter, $cursor, $budget_seconds);
+
+        return array(
+            'imported' => false,
+            'in_progress' => true,
+            'cursor' => array('table_index' => 0, 'chunk_index' => 0, 'statement_index' => 1),
+            'table_count' => 1,
+            'chunk_count' => 0,
+            'statement_count' => 1,
+            'warnings' => array(),
+        );
     }
 }

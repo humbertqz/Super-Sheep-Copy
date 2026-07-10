@@ -14,6 +14,73 @@ class DatabaseChunkImporter
      * @param list<array{name:string,charset?:string,collation?:string,chunks:list<string>}> $tables
      * @param array<string,string> $chunks
      * @param array<string,string> $table_map
+     * @param array<string,mixed> $cursor
+     * @return array{imported:bool,in_progress:bool,cursor:array<string,mixed>,table_count:int,chunk_count:int,statement_count:int,warnings:list<string>}
+     */
+    public function importStep(array $credentials, array $tables, array $chunks, array $table_map, SqlTableNameRewriter $rewriter, array $cursor = array(), float $budget_seconds = 10.0): array
+    {
+        if (!class_exists('\\mysqli')) {
+            return $this->stepResult(false, false, $cursor, 0, 0, 0, array('The mysqli extension is not available.'));
+        }
+
+        \mysqli_report(MYSQLI_REPORT_OFF);
+        $mysqli = $this->connect($credentials);
+        if ($mysqli->connect_errno !== 0) {
+            return $this->stepResult(false, false, $cursor, 0, 0, 0, array('Database connection failed.'));
+        }
+        $this->setConnectionCharset($mysqli, $credentials);
+        $table_index = isset($cursor['table_index']) ? max(0, (int) $cursor['table_index']) : 0;
+        $chunk_index = isset($cursor['chunk_index']) ? max(0, (int) $cursor['chunk_index']) : 0;
+        $statement_index = isset($cursor['statement_index']) ? max(0, (int) $cursor['statement_index']) : 0;
+        $statement_count = 0;
+        $chunk_count = 0;
+        $started = microtime(true);
+        $allowed_tables = array_values($table_map);
+
+        while ($table_index < count($tables)) {
+            $table = $tables[$table_index];
+            $chunk_names = isset($table['chunks']) && is_array($table['chunks']) ? array_values($table['chunks']) : array();
+            if ($chunk_index >= count($chunk_names)) {
+                $table_index++;
+                $chunk_index = 0;
+                $statement_index = 0;
+                continue;
+            }
+            $chunk_name = (string) $chunk_names[$chunk_index];
+            $sql = $rewriter->rewrite(isset($chunks[$chunk_name]) ? $chunks[$chunk_name] : '', $table_map);
+            $statements = $this->splitStatements($sql);
+            while ($statement_index < count($statements)) {
+                $statement = $this->normalizeCreateTableEncoding($statements[$statement_index], $credentials);
+                $this->assertSafeStatement($statement, $allowed_tables);
+                if (!$mysqli->query($statement)) {
+                    $warning = $this->failedStatementWarning($mysqli, $table['name'], $chunk_name, $statement);
+                    $mysqli->close();
+
+                    return $this->stepResult(false, false, compact('table_index', 'chunk_index', 'statement_index'), count($tables), $chunk_count, $statement_count, array($warning));
+                }
+                ++$statement_index;
+                ++$statement_count;
+                if (microtime(true) - $started >= max(0.1, $budget_seconds)) {
+                    $mysqli->close();
+
+                    return $this->stepResult(false, true, compact('table_index', 'chunk_index', 'statement_index'), count($tables), $chunk_count, $statement_count, array());
+                }
+            }
+            ++$chunk_count;
+            ++$chunk_index;
+            $statement_index = 0;
+        }
+
+        $mysqli->close();
+
+        return $this->stepResult(true, false, array('table_index' => $table_index, 'chunk_index' => 0, 'statement_index' => 0), count($tables), $chunk_count, $statement_count, array());
+    }
+
+    /**
+     * @param array<string,mixed> $credentials
+     * @param list<array{name:string,charset?:string,collation?:string,chunks:list<string>}> $tables
+     * @param array<string,string> $chunks
+     * @param array<string,string> $table_map
      * @return array{imported:bool,table_count:int,chunk_count:int,statement_count:int,warnings:list<string>}
      */
     public function import(array $credentials, array $tables, array $chunks, array $table_map, SqlTableNameRewriter $rewriter): array
@@ -74,6 +141,12 @@ class DatabaseChunkImporter
         $mysqli->close();
 
         return $this->result(true, count($tables), $chunk_count, $statement_count, array());
+    }
+
+    /** @return array<string,mixed> */
+    private function stepResult(bool $imported, bool $in_progress, array $cursor, int $table_count, int $chunk_count, int $statement_count, array $warnings): array
+    {
+        return array('imported' => $imported, 'in_progress' => $in_progress, 'cursor' => $cursor, 'table_count' => $table_count, 'chunk_count' => $chunk_count, 'statement_count' => $statement_count, 'warnings' => $warnings);
     }
 
     /**
