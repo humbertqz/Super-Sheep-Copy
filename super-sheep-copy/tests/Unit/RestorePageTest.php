@@ -289,9 +289,10 @@ final class RestorePageTest extends TestCase
 
         ob_start();
         $page->render();
-        ob_end_clean();
+        $html = (string) ob_get_clean();
 
-        self::assertSame('https://example.com/wp-admin/admin.php?page=super-sheep-copy-restore&super_sheep_copy_status=restore_failed', $GLOBALS['ssc_test_redirect']);
+        self::assertSame('https://example.com/wp-admin/admin.php?page=super-sheep-copy-restore&super_sheep_copy_status=restore_failed&super_sheep_copy_restore_error=restore+failed', $GLOBALS['ssc_test_redirect']);
+        self::assertStringContainsString('Reason: restore failed', $html);
     }
 
     public function testPreparedRestoreViewShowsInstallerPreparationForm(): void

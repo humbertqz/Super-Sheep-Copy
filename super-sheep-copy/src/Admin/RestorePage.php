@@ -28,6 +28,7 @@ final class RestorePage
     private const ACTION_PREPARE_RESTORE = 'prepare_restore';
     private const STATUS_FIELD = 'super_sheep_copy_status';
     private const FILE_FIELD = 'super_sheep_copy_restore_archive';
+    private const RESTORE_ERROR_FIELD = 'super_sheep_copy_restore_error';
     private const STAGED_ARCHIVE_FIELD = 'super_sheep_copy_staged_archive';
     private const JOB_ID_FIELD = 'super_sheep_copy_restore_job_id';
     private const INSTALLER_TOKEN_FIELD = 'super_sheep_copy_installer_token';
@@ -67,6 +68,7 @@ final class RestorePage
 
         $environment = $this->environment_checker->check();
         $status = $this->status();
+        $restore_error = $this->restoreError();
         $restore_job = $this->restoreJob();
         $installer_token = $this->installerToken();
         $installer_launch_url = $this->installerLaunchUrl($restore_job, $installer_token);
@@ -94,8 +96,9 @@ final class RestorePage
             $result = $this->restore_preparation->prepare($upload);
             $this->redirectToState('restore_prepared', array(self::JOB_ID_FIELD => $result->jobId()));
         } catch (Throwable $throwable) {
-            $this->logger->warning('Restore preparation failed.');
-            $this->redirectToState('restore_failed');
+            $error = $this->truncateRestoreError($throwable->getMessage());
+            $this->logger->warning('Restore preparation failed.', array('error' => $error));
+            $this->redirectToState('restore_failed', array(self::RESTORE_ERROR_FIELD => $error));
         }
 
         return true;
@@ -190,6 +193,18 @@ final class RestorePage
     private function status(): string
     {
         return isset($_GET[self::STATUS_FIELD]) ? sanitize_text_field(wp_unslash($_GET[self::STATUS_FIELD])) : '';
+    }
+
+    private function restoreError(): string
+    {
+        $error = isset($_GET[self::RESTORE_ERROR_FIELD]) ? sanitize_text_field(wp_unslash($_GET[self::RESTORE_ERROR_FIELD])) : '';
+
+        return $this->truncateRestoreError($error);
+    }
+
+    private function truncateRestoreError(string $error): string
+    {
+        return substr($error, 0, 500);
     }
 
     private function restoreJob(): ?Job

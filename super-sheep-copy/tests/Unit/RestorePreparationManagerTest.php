@@ -83,6 +83,25 @@ final class RestorePreparationManagerTest extends TestCase
         $manager->prepare($this->upload('backup.txt', $file));
     }
 
+    public function testReportsArchiveValidationFailureReasons(): void
+    {
+        if (!class_exists(ZipArchive::class)) {
+            self::markTestSkipped('ZipArchive is not available.');
+        }
+
+        $archive = $this->root . '/invalid-backup.zip';
+        $zip = new ZipArchive();
+        self::assertTrue($zip->open($archive, ZipArchive::CREATE | ZipArchive::OVERWRITE));
+        $zip->addFromString('manifest.json', '{}');
+        $zip->close();
+
+        $manager = new RestorePreparationManager(new ArchiveValidator(), new MemoryRestoreJobRepository(), $this->root . '/restore');
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Missing checksums.json.');
+        $manager->prepare($this->upload('invalid-backup.zip', $archive));
+    }
+
     public function testPreparesValidTarGzRestorePackage(): void
     {
         if (!class_exists(PharData::class)) {

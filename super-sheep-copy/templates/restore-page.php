@@ -8,6 +8,7 @@
  * @var list<string> $staged_archives
  * @var \SuperSheepCopy\Jobs\Job|null $restore_job
  * @var string $restore_staging_directory
+ * @var string $restore_error
  * @var string $status
  */
 defined('ABSPATH') || exit;
@@ -30,6 +31,9 @@ defined('ABSPATH') || exit;
 <?php elseif ($status === 'restore_failed') : ?>
     <div class="super-sheep-copy-admin-notice super-sheep-copy-admin-notice-error">
         <p><?php echo esc_html__('Restore package preparation failed. Confirm the backup file is a valid Super Sheep Copy package.', 'super-sheep-copy'); ?></p>
+        <?php if ($restore_error !== '') : ?>
+            <p><?php echo esc_html(sprintf(__('Reason: %s', 'super-sheep-copy'), $restore_error)); ?></p>
+        <?php endif; ?>
     </div>
 <?php endif; ?>
 <?php if ($status === 'installer_prepared') : ?>

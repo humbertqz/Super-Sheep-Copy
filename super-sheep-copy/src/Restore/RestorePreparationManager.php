@@ -33,7 +33,7 @@ final class RestorePreparationManager implements RestorePreparationManagerInterf
         $tmp_name = (string) $upload['tmp_name'];
         $validation = $this->archive_validator->validatePackage($tmp_name);
         if (!$validation->isValid()) {
-            throw new RuntimeException('Restore archive is not a valid Super Sheep Copy backup.');
+            throw new RuntimeException('Restore archive validation failed: ' . implode(' ', array_slice($validation->errors(), 0, 3)));
         }
 
         $this->ensureDirectory($this->staging_directory);
