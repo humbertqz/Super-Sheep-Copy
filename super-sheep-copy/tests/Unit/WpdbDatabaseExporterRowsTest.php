@@ -56,6 +56,30 @@ final class WpdbDatabaseExporterRowsTest extends TestCase
         self::assertSame(array(array('ID' => 1, 'post_title' => 'Hello')), $rows->rows());
     }
 
+    public function testBuildsQueryWithHyphenatedPrimaryKey(): void
+    {
+        $client = new RowsFakeClient();
+        $exporter = new WpdbDatabaseExporter($client, new TableSelector());
+        $plan = new ChunkPlan('wp_posts', 'wp_posts.part001.sql', ChunkPlan::STRATEGY_PRIMARY_KEY, 'play-large', null, 100, null, 1);
+
+        self::assertSame(
+            'SELECT * FROM `wp_posts` ORDER BY `play-large` ASC LIMIT 100',
+            $exporter->buildChunkQuery($plan)
+        );
+    }
+
+    public function testFetchesRowsWithHyphenatedColumn(): void
+    {
+        $client = new RowsFakeClient(array(array('play-large' => 1)));
+        $exporter = new WpdbDatabaseExporter($client, new TableSelector());
+        $plan = new ChunkPlan('wp_posts', 'wp_posts.part001.sql', ChunkPlan::STRATEGY_OFFSET, null, null, 100, 0, 1);
+
+        $rows = $exporter->fetchRows($plan, array('play-large'));
+
+        self::assertSame(array('play-large'), $rows->columns());
+        self::assertSame(array(array('play-large' => 1)), $rows->rows());
+    }
+
     public function testRejectsUnsafeColumnIdentifier(): void
     {
         $this->expectException(InvalidArgumentException::class);
@@ -70,6 +94,17 @@ final class RowsFakeClient implements WpdbClientInterface
 {
     /** @var array<int, array{0:string,1:array<int,mixed>}> */
     public array $prepared = array();
+
+    /** @var array<int, array<string, mixed>>|null */
+    private ?array $rows;
+
+    /**
+     * @param array<int, array<string, mixed>>|null $rows
+     */
+    public function __construct(?array $rows = null)
+    {
+        $this->rows = $rows;
+    }
 
     public function getTables(): array
     {
@@ -103,7 +138,7 @@ final class RowsFakeClient implements WpdbClientInterface
 
     public function getRows(string $sql): array
     {
-        return array(array('ID' => 1, 'post_title' => 'Hello'));
+        return $this->rows ?? array(array('ID' => 1, 'post_title' => 'Hello'));
     }
 
     public function prepare(string $sql, array $args): string

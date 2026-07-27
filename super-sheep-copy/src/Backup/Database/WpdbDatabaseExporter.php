@@ -98,7 +98,7 @@ final class WpdbDatabaseExporter
 
     private function assertIdentifier(string $identifier): void
     {
-        if ($identifier === '' || preg_match('/^[A-Za-z0-9_]+$/', $identifier) !== 1) {
+        if ($identifier === '' || preg_match('/^[A-Za-z0-9_-]+$/', $identifier) !== 1) {
             throw new InvalidArgumentException('Unsafe SQL identifier: ' . esc_html($identifier));
         }
     }

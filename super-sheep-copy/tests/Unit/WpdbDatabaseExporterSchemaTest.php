@@ -37,6 +37,16 @@ final class WpdbDatabaseExporterSchemaTest extends TestCase
         self::assertSame('utf8mb4_unicode_ci', $schema->collation());
     }
 
+    public function testAcceptsHyphenatedTableIdentifier(): void
+    {
+        $exporter = new WpdbDatabaseExporter(new SchemaFakeClient(), new TableSelector());
+
+        $schema = $exporter->getSchema('wp-play-large');
+
+        self::assertSame('wp-play-large', $schema->name());
+        self::assertSame('CREATE TABLE `wp-play-large` (`ID` bigint)', $schema->createSql());
+    }
+
     public function testRejectsUnsafeTableIdentifier(): void
     {
         $this->expectException(InvalidArgumentException::class);
