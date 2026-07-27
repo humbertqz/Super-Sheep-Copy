@@ -84,7 +84,7 @@ final class WpdbClient implements WpdbClientInterface
 
     private function quoteIdentifier(string $identifier): string
     {
-        if (!preg_match('/^[A-Za-z0-9_]+$/', $identifier)) {
+        if (!preg_match('/^[A-Za-z0-9_-]+$/', $identifier)) {
             throw new \InvalidArgumentException('Unsafe SQL identifier.');
         }
 

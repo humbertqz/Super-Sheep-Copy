@@ -38,6 +38,17 @@ final class WpdbClientTest extends TestCase
         self::assertSame('CREATE TABLE `wp_actionscheduler_actions` (`action_id` bigint)', $client->getCreateTableSql('wp_actionscheduler_actions'));
     }
 
+    public function testQueriesHyphenatedTableIdentifier(): void
+    {
+        $client = new WpdbClient(new FakeWpdb());
+
+        self::assertSame(
+            'CREATE TABLE `wp-play-large` (`play-large` bigint)',
+            $client->getCreateTableSql('wp-play-large')
+        );
+        self::assertSame(array('play-large'), $client->getColumns('wp-play-large'));
+    }
+
     public function testRejectsUnsafeSqlIdentifiersBeforeQuerying(): void
     {
         $wpdb = new FakeWpdb();
@@ -80,6 +91,10 @@ final class FakeWpdb
             return array('wp_posts', 'CREATE TABLE `wp_posts` (`ID` bigint)');
         }
 
+        if ($sql === 'SHOW CREATE TABLE `wp-play-large`' && $output === 'ARRAY_N') {
+            return array('wp-play-large', 'CREATE TABLE `wp-play-large` (`play-large` bigint)');
+        }
+
         return array('Collation' => 'utf8mb4_unicode_ci', 'Charset' => 'utf8mb4');
     }
 
@@ -91,6 +106,10 @@ final class FakeWpdb
 
         if ($sql === 'SHOW COLUMNS FROM `wp_posts`') {
             return array(array('Field' => 'ID'), array('Field' => 'post_title'));
+        }
+
+        if ($sql === 'SHOW COLUMNS FROM `wp-play-large`') {
+            return array(array('Field' => 'play-large'));
         }
 
         return array(array('ID' => 1));
