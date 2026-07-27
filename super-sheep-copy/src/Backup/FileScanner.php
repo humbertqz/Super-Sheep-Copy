@@ -249,11 +249,23 @@ final class FileScanner
         }));
     }
 
+    private function isWcpdfTemporaryAttachment(string $relative): bool
+    {
+        return preg_match(
+            '#^wp-content/uploads/wpo_wcpdf_[^/]+/attachments(?:/|$)#',
+            $relative
+        ) === 1;
+    }
+
     private function isExcluded(string $relative, bool $exclude_cache = true): bool
     {
         $relative = trim(str_replace('\\', '/', $relative), '/');
         $name = basename($relative);
         if (in_array($name, $this->excluded_names, true)) {
+            return true;
+        }
+
+        if ($this->isWcpdfTemporaryAttachment($relative)) {
             return true;
         }
 

@@ -39,6 +39,53 @@ final class FileScannerTest extends TestCase
         self::assertSame(array('.htaccess', 'wp-content/uploads/image.txt'), $paths);
     }
 
+    public function testScanExcludesOnlyWcpdfTemporaryAttachments(): void
+    {
+        $this->createWcpdfFiles();
+
+        $paths = array_map(
+            static fn ($file): string => $file->relativePath(),
+            (new FileScanner())->scan($this->root)
+        );
+
+        self::assertNotContains(
+            'wp-content/uploads/wpo_wcpdf_3fd2be178174c22c46a531a81aaee8ce/attachments/invoice-8370.pdf',
+            $paths
+        );
+        self::assertContains(
+            'wp-content/uploads/wpo_wcpdf_3fd2be178174c22c46a531a81aaee8ce/archive/invoice-8370.pdf',
+            $paths
+        );
+        self::assertContains(
+            'wp-content/uploads/customer-documents/attachments/invoice-8370.pdf',
+            $paths
+        );
+    }
+
+    public function testScanStepExcludesWcpdfTemporaryAttachments(): void
+    {
+        $this->createWcpdfFiles();
+        $payload = array();
+        $scanner = new FileScanner();
+
+        while (empty($payload['file_scan_complete'])) {
+            $payload = $scanner->scanStep($this->root, $payload, 1);
+        }
+
+        $paths = array_map(static function (array $file): string {
+            return (string) $file['relative_path'];
+        }, $payload['scanned_files']);
+
+        self::assertNotContains(
+            'wp-content/uploads/wpo_wcpdf_3fd2be178174c22c46a531a81aaee8ce/attachments/invoice-8370.pdf',
+            $paths
+        );
+        self::assertContains(
+            'wp-content/uploads/wpo_wcpdf_3fd2be178174c22c46a531a81aaee8ce/archive/invoice-8370.pdf',
+            $paths
+        );
+    }
+
     public function testScansFilesAcrossBoundedSteps(): void
     {
         file_put_contents($this->root . '/wp-content/uploads/second.txt', 'second');
@@ -128,6 +175,26 @@ final class FileScannerTest extends TestCase
         self::assertNotContains('wp-content/uploads/large.bin', $paths);
         self::assertSame(3, $payload['skipped_large_file_count']);
         self::assertNotEmpty($payload['skipped_large_files']);
+    }
+
+    private function createWcpdfFiles(): void
+    {
+        mkdir($this->root . '/wp-content/uploads/wpo_wcpdf_3fd2be178174c22c46a531a81aaee8ce/attachments', 0777, true);
+        mkdir($this->root . '/wp-content/uploads/wpo_wcpdf_3fd2be178174c22c46a531a81aaee8ce/archive', 0777, true);
+        mkdir($this->root . '/wp-content/uploads/customer-documents/attachments', 0777, true);
+
+        file_put_contents(
+            $this->root . '/wp-content/uploads/wpo_wcpdf_3fd2be178174c22c46a531a81aaee8ce/attachments/invoice-8370.pdf',
+            'temporary invoice'
+        );
+        file_put_contents(
+            $this->root . '/wp-content/uploads/wpo_wcpdf_3fd2be178174c22c46a531a81aaee8ce/archive/invoice-8370.pdf',
+            'persistent invoice'
+        );
+        file_put_contents(
+            $this->root . '/wp-content/uploads/customer-documents/attachments/invoice-8370.pdf',
+            'customer document'
+        );
     }
 
     private function removeDirectory(string $path): void
