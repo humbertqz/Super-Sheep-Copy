@@ -12,6 +12,7 @@ use SuperSheepCopy\Backup\BackupStepRunnerInterface;
 use SuperSheepCopy\Backup\BackupManagerFactoryInterface;
 use SuperSheepCopy\Backup\BackupMetadataCollectorInterface;
 use SuperSheepCopy\Backup\BackupRunnerInterface;
+use SuperSheepCopy\Backup\Lock\BackupJobExecutionLockInterface;
 use SuperSheepCopy\Jobs\Job;
 use SuperSheepCopy\Jobs\JobRepositoryInterface;
 use SuperSheepCopy\Restore\InstallerPreparationManagerInterface;
@@ -40,7 +41,7 @@ final class BackupStepAjaxHandlerTest extends TestCase
         $_REQUEST[Nonce::FIELD] = 'test-nonce';
         $_REQUEST['job_id'] = 'backup-123';
 
-        $handler = new BackupStepAjaxHandler(new Capability(), new Nonce(), new BackupStepAjaxJobRepository(), new BackupStepAjaxRunner());
+        $handler = new BackupStepAjaxHandler(new Capability(), new Nonce(), new BackupStepAjaxJobRepository(), new BackupStepAjaxRunner(), new BackupStepAjaxLock());
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('You do not have permission to manage backups.');
@@ -56,7 +57,7 @@ final class BackupStepAjaxHandlerTest extends TestCase
         $_REQUEST[Nonce::FIELD] = 'bad-nonce';
         $_REQUEST['job_id'] = 'backup-123';
 
-        $handler = new BackupStepAjaxHandler(new Capability(), new Nonce(), new BackupStepAjaxJobRepository(), new BackupStepAjaxRunner());
+        $handler = new BackupStepAjaxHandler(new Capability(), new Nonce(), new BackupStepAjaxJobRepository(), new BackupStepAjaxRunner(), new BackupStepAjaxLock());
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('Invalid Super Sheep Copy nonce.');
@@ -71,7 +72,7 @@ final class BackupStepAjaxHandlerTest extends TestCase
         $_REQUEST[Nonce::FIELD] = 'test-nonce';
         $_REQUEST['job_id'] = 'missing-job';
 
-        $handler = new BackupStepAjaxHandler(new Capability(), new Nonce(), new BackupStepAjaxJobRepository(), new BackupStepAjaxRunner());
+        $handler = new BackupStepAjaxHandler(new Capability(), new Nonce(), new BackupStepAjaxJobRepository(), new BackupStepAjaxRunner(), new BackupStepAjaxLock());
 
         try {
             $handler->handle();
@@ -93,7 +94,8 @@ final class BackupStepAjaxHandlerTest extends TestCase
         ));
 
         $runner = new BackupStepAjaxRunner(new Job('backup-123', 'backup', Job::SCANNING_FILES, array('message' => 'Database export finished')));
-        $handler = new BackupStepAjaxHandler(new Capability(), new Nonce(), $jobs, $runner);
+        $lock = new BackupStepAjaxLock();
+        $handler = new BackupStepAjaxHandler(new Capability(), new Nonce(), $jobs, $runner, $lock);
 
         try {
             $handler->handle();
@@ -109,6 +111,10 @@ final class BackupStepAjaxHandlerTest extends TestCase
             'status' => 'queued',
         ), $GLOBALS['ssc_test_json_response']['data']);
         self::assertSame('backup-123', $runner->receivedJob()->id());
+        self::assertSame(array(
+            'acquire:backup-123',
+            'release:backup-123:ajax-owner',
+        ), $lock->events);
     }
 
     public function testRetryFailedJobRunsPreviousFailedState(): void
@@ -123,7 +129,7 @@ final class BackupStepAjaxHandlerTest extends TestCase
             )),
         ));
         $runner = new BackupStepAjaxRunner(new Job('backup-123', 'backup', Job::PACKAGING_ARCHIVE, array('message' => 'Packaged 1 of 2 archive entries.')));
-        $handler = new BackupStepAjaxHandler(new Capability(), new Nonce(), $jobs, $runner);
+        $handler = new BackupStepAjaxHandler(new Capability(), new Nonce(), $jobs, $runner, new BackupStepAjaxLock());
 
         try {
             $handler->handle();
@@ -142,7 +148,8 @@ final class BackupStepAjaxHandlerTest extends TestCase
         $jobs = new BackupStepAjaxJobRepository(array(
             new Job('backup-123', 'backup', Job::PACKAGING_ARCHIVE, array('message' => 'Packaging archive.')),
         ));
-        $handler = new BackupStepAjaxHandler(new Capability(), new Nonce(), $jobs, new BackupStepAjaxThrowingRunner());
+        $lock = new BackupStepAjaxLock();
+        $handler = new BackupStepAjaxHandler(new Capability(), new Nonce(), $jobs, new BackupStepAjaxThrowingRunner(), $lock);
 
         try {
             $handler->handle();
@@ -155,6 +162,10 @@ final class BackupStepAjaxHandlerTest extends TestCase
         self::assertSame('failed', $GLOBALS['ssc_test_json_response']['data']['status']);
         self::assertSame('Backup failed: archive close timeout', $GLOBALS['ssc_test_json_response']['data']['message']);
         self::assertSame(Job::PACKAGING_ARCHIVE, $jobs->find('backup-123')->payload()['failed_state']);
+        self::assertSame(array(
+            'acquire:backup-123',
+            'release:backup-123:ajax-owner',
+        ), $lock->events);
     }
 
     public function testForeignRunningBackupJobFailsBeforeRunnerExecutes(): void
@@ -169,7 +180,7 @@ final class BackupStepAjaxHandlerTest extends TestCase
             )),
         ));
         $runner = new BackupStepAjaxRunner(new Job('backup-123', 'backup', Job::SCANNING_FILES, array('message' => 'Should not run')));
-        $handler = new BackupStepAjaxHandler(new Capability(), new Nonce(), $jobs, $runner);
+        $handler = new BackupStepAjaxHandler(new Capability(), new Nonce(), $jobs, $runner, new BackupStepAjaxLock());
 
         try {
             $handler->handle();
@@ -180,6 +191,29 @@ final class BackupStepAjaxHandlerTest extends TestCase
         self::assertNull($runner->receivedJob());
         self::assertSame(Job::FAILED, $GLOBALS['ssc_test_json_response']['data']['state']);
         self::assertSame('Backup failed: job belongs to a different site or upload directory.', $GLOBALS['ssc_test_json_response']['data']['message']);
+    }
+
+    public function testBusyJobReturnsCurrentProgressWithoutRunningStep(): void
+    {
+        $_REQUEST[Nonce::FIELD] = 'test-nonce';
+        $_REQUEST['job_id'] = 'backup-123';
+        $job = new Job('backup-123', 'backup', Job::PACKAGING_ARCHIVE, array('message' => 'Packaging archive.'));
+        $jobs = new BackupStepAjaxJobRepository(array($job));
+        $runner = new BackupStepAjaxRunner();
+        $lock = new BackupStepAjaxLock(null);
+        $handler = new BackupStepAjaxHandler(new Capability(), new Nonce(), $jobs, $runner, $lock);
+
+        try {
+            $handler->handle();
+        } catch (RuntimeException $exception) {
+            self::assertSame('wp_send_json_success', $exception->getMessage());
+        }
+
+        self::assertNull($runner->receivedJob());
+        self::assertSame(Job::PACKAGING_ARCHIVE, $GLOBALS['ssc_test_json_response']['data']['state']);
+        self::assertSame('Another backup step is still running.', $GLOBALS['ssc_test_json_response']['data']['message']);
+        self::assertSame(array('acquire:backup-123'), $lock->events);
+        self::assertSame('Packaging archive.', $jobs->find('backup-123')->payload()['message']);
     }
 
     public function testAdminMenuRegistersBackupStepAjaxAction(): void
@@ -236,6 +270,30 @@ final class BackupStepAjaxThrowingRunner implements BackupStepRunnerInterface
     public function runStep(Job $job): Job
     {
         throw new RuntimeException('archive close timeout');
+    }
+}
+
+final class BackupStepAjaxLock implements BackupJobExecutionLockInterface
+{
+    /** @var string[] */
+    public array $events = array();
+    private ?string $owner;
+
+    public function __construct(?string $owner = 'ajax-owner')
+    {
+        $this->owner = $owner;
+    }
+
+    public function acquire(string $job_id): ?string
+    {
+        $this->events[] = 'acquire:' . $job_id;
+
+        return $this->owner;
+    }
+
+    public function release(string $job_id, string $owner_token): void
+    {
+        $this->events[] = 'release:' . $job_id . ':' . $owner_token;
     }
 }
 

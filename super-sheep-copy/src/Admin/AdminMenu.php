@@ -14,6 +14,9 @@ use SuperSheepCopy\Backup\BackupArchiveStepPackager;
 use SuperSheepCopy\Backup\BackupStepRunner;
 use SuperSheepCopy\Backup\FileScanner;
 use SuperSheepCopy\Backup\ManifestBuilder;
+use SuperSheepCopy\Backup\Lock\BackupJobExecutionLock;
+use SuperSheepCopy\Backup\Lock\BackupJobExecutionLockInterface;
+use SuperSheepCopy\Backup\Lock\WordPressOptionBackupJobLockStore;
 use SuperSheepCopy\Backup\Database\ChunkPlanner;
 use SuperSheepCopy\Backup\Database\DatabaseExportManifestBuilder;
 use SuperSheepCopy\Backup\Database\SqlDumpFormatter;
@@ -42,6 +45,7 @@ final class AdminMenu
     private InstallerPreparationManagerInterface $installer_preparation;
     /** @var object */
     private $wpdb;
+    private BackupJobExecutionLockInterface $backup_lock;
 
     public function __construct(
         Capability $capability,
@@ -53,7 +57,8 @@ final class AdminMenu
         BackupMetadataCollectorInterface $metadata_collector,
         RestorePreparationManagerInterface $restore_preparation,
         InstallerPreparationManagerInterface $installer_preparation,
-        $wpdb = null
+        $wpdb = null,
+        ?BackupJobExecutionLockInterface $backup_lock = null
     ) {
         $this->capability = $capability;
         $this->nonce = $nonce;
@@ -65,6 +70,7 @@ final class AdminMenu
         $this->restore_preparation = $restore_preparation;
         $this->installer_preparation = $installer_preparation;
         $this->wpdb = $wpdb !== null ? $wpdb : (isset($GLOBALS['wpdb']) ? $GLOBALS['wpdb'] : new \stdClass());
+        $this->backup_lock = $backup_lock ?? new BackupJobExecutionLock(new WordPressOptionBackupJobLockStore($this->wpdb));
     }
 
     public function register(): void
@@ -189,7 +195,8 @@ final class AdminMenu
                 new DatabaseExportManifestBuilder(),
                 new FileScanner(),
                 $packager
-            )
+            ),
+            $this->backup_lock
         );
     }
 }

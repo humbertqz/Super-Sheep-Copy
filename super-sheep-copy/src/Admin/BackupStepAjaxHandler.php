@@ -7,6 +7,7 @@ namespace SuperSheepCopy\Admin;
 
 use SuperSheepCopy\Backup\BackupStepRunnerInterface;
 use SuperSheepCopy\Backup\BackupJobSiteGuard;
+use SuperSheepCopy\Backup\Lock\BackupJobExecutionLockInterface;
 use SuperSheepCopy\Jobs\Job;
 use SuperSheepCopy\Jobs\JobRepositoryInterface;
 use SuperSheepCopy\Plugin;
@@ -20,13 +21,20 @@ final class BackupStepAjaxHandler
     private Nonce $nonce;
     private JobRepositoryInterface $jobs;
     private BackupStepRunnerInterface $runner;
+    private BackupJobExecutionLockInterface $lock;
 
-    public function __construct(Capability $capability, Nonce $nonce, JobRepositoryInterface $jobs, BackupStepRunnerInterface $runner)
-    {
+    public function __construct(
+        Capability $capability,
+        Nonce $nonce,
+        JobRepositoryInterface $jobs,
+        BackupStepRunnerInterface $runner,
+        BackupJobExecutionLockInterface $lock
+    ) {
         $this->capability = $capability;
         $this->nonce = $nonce;
         $this->jobs = $jobs;
         $this->runner = $runner;
+        $this->lock = $lock;
     }
 
     public function handle(): void
@@ -51,24 +59,36 @@ final class BackupStepAjaxHandler
             wp_send_json_success($this->responsePayload($job));
         }
 
-        $retry = isset($_REQUEST['retry']) && sanitize_text_field(wp_unslash($_REQUEST['retry'])) === '1';
-        if ($retry && $job->state() === Job::FAILED) {
+        $owner_token = $this->lock->acquire($job->id());
+        if ($owner_token === null) {
             $payload = $job->payload();
-            $failed_state = isset($payload['failed_state']) && is_scalar($payload['failed_state']) ? (string) $payload['failed_state'] : Job::CREATED;
-            unset($payload['error']);
-            $payload['message'] = 'Retrying backup.';
-            $job = new Job($job->id(), $job->type(), $failed_state, $payload);
+            $payload['message'] = 'Another backup step is still running.';
+            $busy_job = new Job($job->id(), $job->type(), $job->state(), $payload);
+            wp_send_json_success($this->responsePayload($busy_job));
         }
 
         try {
-            $job = $this->runner->runStep($job);
-        } catch (Throwable $throwable) {
-            $payload = $job->payload();
-            $payload['message'] = 'Backup failed: ' . $throwable->getMessage();
-            $payload['error'] = $throwable->getMessage();
-            $payload['failed_state'] = $job->state();
-            $job = new Job($job->id(), $job->type(), Job::FAILED, $payload);
-            $this->jobs->save($job);
+            $retry = isset($_REQUEST['retry']) && sanitize_text_field(wp_unslash($_REQUEST['retry'])) === '1';
+            if ($retry && $job->state() === Job::FAILED) {
+                $payload = $job->payload();
+                $failed_state = isset($payload['failed_state']) && is_scalar($payload['failed_state']) ? (string) $payload['failed_state'] : Job::CREATED;
+                unset($payload['error']);
+                $payload['message'] = 'Retrying backup.';
+                $job = new Job($job->id(), $job->type(), $failed_state, $payload);
+            }
+
+            try {
+                $job = $this->runner->runStep($job);
+            } catch (Throwable $throwable) {
+                $payload = $job->payload();
+                $payload['message'] = 'Backup failed: ' . $throwable->getMessage();
+                $payload['error'] = $throwable->getMessage();
+                $payload['failed_state'] = $job->state();
+                $job = new Job($job->id(), $job->type(), Job::FAILED, $payload);
+                $this->jobs->save($job);
+            }
+        } finally {
+            $this->lock->release($job->id(), $owner_token);
         }
 
         wp_send_json_success($this->responsePayload($job));
