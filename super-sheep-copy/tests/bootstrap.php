@@ -62,11 +62,19 @@ $GLOBALS['ssc_test_stylesheet'] = 'twentytwentyfour';
 $GLOBALS['ssc_test_mu_plugins'] = array();
 $GLOBALS['ssc_test_deleted_files'] = array();
 $GLOBALS['ssc_test_scheduled_events'] = array();
+$GLOBALS['ssc_test_is_admin'] = true;
 
 if (!function_exists('__')) {
     function __(string $text, string $domain = 'default'): string
     {
         return $text;
+    }
+}
+
+if (!function_exists('is_admin')) {
+    function is_admin(): bool
+    {
+        return (bool) $GLOBALS['ssc_test_is_admin'];
     }
 }
 

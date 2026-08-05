@@ -216,6 +216,26 @@ final class BackupStepAjaxHandlerTest extends TestCase
         self::assertSame('Packaging archive.', $jobs->find('backup-123')->payload()['message']);
     }
 
+    public function testReleaseFailureDoesNotReplaceSuccessfulStepResponse(): void
+    {
+        $_REQUEST[Nonce::FIELD] = 'test-nonce';
+        $_REQUEST['job_id'] = 'backup-123';
+        $jobs = new BackupStepAjaxJobRepository(array(
+            new Job('backup-123', 'backup', Job::PACKAGING_ARCHIVE, array()),
+        ));
+        $runner = new BackupStepAjaxRunner(new Job('backup-123', 'backup', Job::COMPLETED, array('message' => 'Backup completed.')));
+        $handler = new BackupStepAjaxHandler(new Capability(), new Nonce(), $jobs, $runner, new BackupStepAjaxLock('ajax-owner', true));
+
+        try {
+            $handler->handle();
+        } catch (RuntimeException $exception) {
+            self::assertSame('wp_send_json_success', $exception->getMessage());
+        }
+
+        self::assertSame(Job::COMPLETED, $GLOBALS['ssc_test_json_response']['data']['state']);
+        self::assertSame('Backup completed.', $GLOBALS['ssc_test_json_response']['data']['message']);
+    }
+
     public function testAdminMenuRegistersBackupStepAjaxAction(): void
     {
         $menu = new AdminMenu(
@@ -278,10 +298,12 @@ final class BackupStepAjaxLock implements BackupJobExecutionLockInterface
     /** @var string[] */
     public array $events = array();
     private ?string $owner;
+    private bool $throw_on_release;
 
-    public function __construct(?string $owner = 'ajax-owner')
+    public function __construct(?string $owner = 'ajax-owner', bool $throw_on_release = false)
     {
         $this->owner = $owner;
+        $this->throw_on_release = $throw_on_release;
     }
 
     public function acquire(string $job_id): ?string
@@ -294,6 +316,9 @@ final class BackupStepAjaxLock implements BackupJobExecutionLockInterface
     public function release(string $job_id, string $owner_token): void
     {
         $this->events[] = 'release:' . $job_id . ':' . $owner_token;
+        if ($this->throw_on_release) {
+            throw new RuntimeException('lock release failed');
+        }
     }
 }
 

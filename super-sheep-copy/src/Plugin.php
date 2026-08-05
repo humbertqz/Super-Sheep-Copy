@@ -11,6 +11,8 @@ use SuperSheepCopy\Backup\BackupMetadataCollector;
 use SuperSheepCopy\Backup\BackupStepRunner;
 use SuperSheepCopy\Backup\FileScanner;
 use SuperSheepCopy\Backup\ManifestBuilder;
+use SuperSheepCopy\Backup\Lock\BackupJobExecutionLock;
+use SuperSheepCopy\Backup\Lock\WordPressOptionBackupJobLockStore;
 use SuperSheepCopy\Backup\Database\ChunkPlanner;
 use SuperSheepCopy\Backup\Database\DatabaseExportManifestBuilder;
 use SuperSheepCopy\Backup\Database\SqlDumpFormatter;
@@ -84,6 +86,7 @@ final class Plugin
         $environment_checker = new EnvironmentChecker();
         $jobs = new OptionJobRepository();
         $metadata_collector = new BackupMetadataCollector($environment_checker);
+        $backup_lock = new BackupJobExecutionLock(new WordPressOptionBackupJobLockStore($wpdb));
 
         $scheduled_runner = new ScheduledBackupRunner(
             $jobs,
@@ -92,7 +95,9 @@ final class Plugin
             $metadata_collector,
             $this->backupStepRunner($jobs, $wpdb),
             defined('ABSPATH') ? ABSPATH : '',
-            self::backupDirectory()
+            self::backupDirectory(),
+            null,
+            $backup_lock
         );
         $scheduled_runner->register();
 
@@ -116,7 +121,9 @@ final class Plugin
                     trailingslashit(self::backupDirectory()) . 'restore',
                     site_url(),
                     $jobs
-                )
+                ),
+                $wpdb,
+                $backup_lock
             );
             $admin_menu->register();
         }

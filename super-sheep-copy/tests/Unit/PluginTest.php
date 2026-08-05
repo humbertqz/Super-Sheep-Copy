@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace SuperSheepCopy\Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
+use ReflectionProperty;
 use SuperSheepCopy\Plugin;
 use SuperSheepCopy\Schedule\ScheduleEventScheduler;
 use SuperSheepCopy\Schedule\ScheduleSettingsRepository;
@@ -30,6 +31,21 @@ final class PluginTest extends TestCase
 
         self::assertArrayNotHasKey(ScheduleEventScheduler::DUE_HOOK, $GLOBALS['ssc_test_scheduled_events']);
         self::assertArrayNotHasKey(ScheduleEventScheduler::CONTINUE_HOOK, $GLOBALS['ssc_test_scheduled_events']);
+    }
+
+    public function testBootSharesBackupExecutionLockBetweenCronAndAjax(): void
+    {
+        $GLOBALS['ssc_test_actions'] = array();
+        $GLOBALS['wpdb'] = new \stdClass();
+
+        Plugin::instance()->boot();
+
+        $scheduled_runner = $GLOBALS['ssc_test_actions'][ScheduleEventScheduler::DUE_HOOK][0]['callback'][0];
+        $ajax_handler = $GLOBALS['ssc_test_actions']['wp_ajax_super_sheep_copy_run_backup_step'][0]['callback'][0];
+        $scheduled_lock = $this->privateProperty($scheduled_runner, 'lock');
+        $ajax_lock = $this->privateProperty($ajax_handler, 'lock');
+
+        self::assertSame($scheduled_lock, $ajax_lock);
     }
 
     public function testUninstallClearsScheduledHooksAndPluginOptions(): void
@@ -108,5 +124,19 @@ final class PluginTest extends TestCase
         }
 
         rmdir($path);
+    }
+
+    /**
+     * @param object $object
+     * @return mixed
+     */
+    private function privateProperty($object, string $name)
+    {
+        $property = new ReflectionProperty($object, $name);
+        if (PHP_VERSION_ID < 80100) {
+            $property->setAccessible(true);
+        }
+
+        return $property->getValue($object);
     }
 }

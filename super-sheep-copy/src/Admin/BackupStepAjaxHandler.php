@@ -88,7 +88,7 @@ final class BackupStepAjaxHandler
                 $this->jobs->save($job);
             }
         } finally {
-            $this->lock->release($job->id(), $owner_token);
+            $this->releaseLock($job->id(), $owner_token);
         }
 
         wp_send_json_success($this->responsePayload($job));
@@ -117,5 +117,14 @@ final class BackupStepAjaxHandler
         }
 
         return 'queued';
+    }
+
+    private function releaseLock(string $job_id, string $owner_token): void
+    {
+        try {
+            $this->lock->release($job_id, $owner_token);
+        } catch (Throwable $throwable) {
+            // The expiring lease permits recovery; preserve the backup result.
+        }
     }
 }

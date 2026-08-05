@@ -7,6 +7,7 @@ namespace SuperSheepCopy\Tests\Unit;
 use PHPUnit\Framework\TestCase;
 use SuperSheepCopy\Backup\BackupMetadataCollectorInterface;
 use SuperSheepCopy\Backup\BackupStepRunnerInterface;
+use SuperSheepCopy\Backup\Lock\BackupJobExecutionLockInterface;
 use SuperSheepCopy\Jobs\Job;
 use SuperSheepCopy\Jobs\JobRepositoryInterface;
 use SuperSheepCopy\Schedule\ScheduleSettings;
@@ -82,14 +83,55 @@ final class ScheduledBackupRunnerTest extends TestCase
         $step_runner = new ScheduleRunnerStepRunner(Job::EXPORTING_DATABASE);
         (new ScheduleSettingsRepository())->save(ScheduleSettings::fromArray(array('enabled' => true)));
 
-        $this->runner($jobs, $step_runner)->handleContinuationEvent();
+        $lock = new ScheduleRunnerExecutionLock();
+        $this->runner($jobs, $step_runner, $lock)->handleContinuationEvent();
 
         self::assertSame(Job::EXPORTING_DATABASE, $jobs->find('backup-scheduled')->state());
         self::assertSame(3, $step_runner->calls);
         self::assertArrayHasKey('super_sheep_copy_scheduled_backup_continue', $GLOBALS['ssc_test_scheduled_events']);
+        self::assertSame(array(
+            'acquire:backup-scheduled',
+            'release:backup-scheduled:owner-1',
+            'acquire:backup-scheduled',
+            'release:backup-scheduled:owner-2',
+            'acquire:backup-scheduled',
+            'release:backup-scheduled:owner-3',
+        ), $lock->events);
     }
 
-    private function runner(ScheduleRunnerJobRepository $jobs, ScheduleRunnerStepRunner $step_runner): ScheduledBackupRunner
+    public function testBusyContinuationReschedulesWithoutExecutingStep(): void
+    {
+        $job = new Job('backup-scheduled', 'backup', Job::PACKAGING_ARCHIVE, array('trigger' => 'scheduled'));
+        $jobs = new ScheduleRunnerJobRepository(array($job));
+        $step_runner = new ScheduleRunnerStepRunner(Job::COMPLETED);
+        $lock = new ScheduleRunnerExecutionLock(array(null));
+
+        $this->runner($jobs, $step_runner, $lock)->handleContinuationEvent();
+
+        self::assertSame(0, $step_runner->calls);
+        self::assertSame(Job::PACKAGING_ARCHIVE, $jobs->find('backup-scheduled')->state());
+        self::assertArrayHasKey('super_sheep_copy_scheduled_backup_continue', $GLOBALS['ssc_test_scheduled_events']);
+        self::assertSame(array('acquire:backup-scheduled'), $lock->events);
+    }
+
+    public function testReleaseFailureDoesNotReplaceCompletedScheduledStep(): void
+    {
+        $job = new Job('backup-scheduled', 'backup', Job::CREATED, array('trigger' => 'scheduled'));
+        $jobs = new ScheduleRunnerJobRepository(array($job));
+        $step_runner = new ScheduleRunnerStepRunner(Job::COMPLETED);
+        $lock = new ScheduleRunnerExecutionLock(array(), true);
+
+        $this->runner($jobs, $step_runner, $lock)->handleContinuationEvent();
+
+        self::assertSame(Job::COMPLETED, $jobs->find('backup-scheduled')->state());
+        self::assertSame('completed', (new ScheduleSettingsRepository())->get()->lastStatus());
+    }
+
+    private function runner(
+        ScheduleRunnerJobRepository $jobs,
+        ScheduleRunnerStepRunner $step_runner,
+        ?ScheduleRunnerExecutionLock $lock = null
+    ): ScheduledBackupRunner
     {
         return new ScheduledBackupRunner(
             $jobs,
@@ -98,7 +140,9 @@ final class ScheduledBackupRunnerTest extends TestCase
             new ScheduleRunnerMetadataCollector(),
             $step_runner,
             '/tmp/ssc-site',
-            sys_get_temp_dir() . '/ssc-test-uploads/super-sheep-copy'
+            sys_get_temp_dir() . '/ssc-test-uploads/super-sheep-copy',
+            null,
+            $lock ?? new ScheduleRunnerExecutionLock()
         );
     }
 }
@@ -164,5 +208,42 @@ final class ScheduleRunnerStepRunner implements BackupStepRunnerInterface
         $payload['updated_at'] = gmdate('c');
 
         return new Job($job->id(), $job->type(), $this->next_state, $payload);
+    }
+}
+
+final class ScheduleRunnerExecutionLock implements BackupJobExecutionLockInterface
+{
+    /** @var string[] */
+    public array $events = array();
+    /** @var list<string|null> */
+    private array $owners;
+    private int $sequence = 0;
+    private bool $throw_on_release;
+
+    /** @param list<string|null> $owners */
+    public function __construct(array $owners = array(), bool $throw_on_release = false)
+    {
+        $this->owners = $owners;
+        $this->throw_on_release = $throw_on_release;
+    }
+
+    public function acquire(string $job_id): ?string
+    {
+        $this->events[] = 'acquire:' . $job_id;
+        if ($this->owners !== array()) {
+            return array_shift($this->owners);
+        }
+
+        $this->sequence++;
+
+        return 'owner-' . $this->sequence;
+    }
+
+    public function release(string $job_id, string $owner_token): void
+    {
+        $this->events[] = 'release:' . $job_id . ':' . $owner_token;
+        if ($this->throw_on_release) {
+            throw new \RuntimeException('lock release failed');
+        }
     }
 }

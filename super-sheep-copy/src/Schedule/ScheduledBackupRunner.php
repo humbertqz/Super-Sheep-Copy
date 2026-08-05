@@ -7,9 +7,13 @@ namespace SuperSheepCopy\Schedule;
 use SuperSheepCopy\Backup\BackupMetadataCollectorInterface;
 use SuperSheepCopy\Backup\BackupOptions;
 use SuperSheepCopy\Backup\BackupStepRunnerInterface;
+use SuperSheepCopy\Backup\Lock\BackupJobExecutionLock;
+use SuperSheepCopy\Backup\Lock\BackupJobExecutionLockInterface;
+use SuperSheepCopy\Backup\Lock\WordPressOptionBackupJobLockStore;
 use SuperSheepCopy\Jobs\Job;
 use SuperSheepCopy\Jobs\JobRepositoryInterface;
 use SuperSheepCopy\Settings\BackupSettingsRepository;
+use Throwable;
 
 final class ScheduledBackupRunner
 {
@@ -23,6 +27,7 @@ final class ScheduledBackupRunner
     private string $site_root;
     private string $backup_directory;
     private ScheduleEventScheduler $events;
+    private BackupJobExecutionLockInterface $lock;
 
     public function __construct(
         JobRepositoryInterface $jobs,
@@ -32,7 +37,8 @@ final class ScheduledBackupRunner
         BackupStepRunnerInterface $step_runner,
         string $site_root,
         string $backup_directory,
-        ?ScheduleEventScheduler $events = null
+        ?ScheduleEventScheduler $events = null,
+        ?BackupJobExecutionLockInterface $lock = null
     ) {
         $this->jobs = $jobs;
         $this->schedule_settings = $schedule_settings;
@@ -42,6 +48,8 @@ final class ScheduledBackupRunner
         $this->site_root = $site_root;
         $this->backup_directory = $backup_directory;
         $this->events = $events ?: new ScheduleEventScheduler();
+        $wpdb = isset($GLOBALS['wpdb']) ? $GLOBALS['wpdb'] : new \stdClass();
+        $this->lock = $lock ?? new BackupJobExecutionLock(new WordPressOptionBackupJobLockStore($wpdb));
     }
 
     public function register(): void
@@ -78,8 +86,18 @@ final class ScheduledBackupRunner
         }
 
         for ($i = 0; $i < self::MAX_STEPS_PER_TICK; $i++) {
-            $job = $this->step_runner->runStep($job);
-            $this->jobs->save($job);
+            $owner_token = $this->lock->acquire($job->id());
+            if ($owner_token === null) {
+                $this->events->scheduleContinuation();
+                return;
+            }
+
+            try {
+                $job = $this->step_runner->runStep($job);
+                $this->jobs->save($job);
+            } finally {
+                $this->releaseLock($job->id(), $owner_token);
+            }
 
             if ($job->state() === Job::COMPLETED) {
                 $this->recordLastRun('completed', 'Scheduled backup completed.');
@@ -158,5 +176,14 @@ final class ScheduledBackupRunner
     private function isRunningState(string $state): bool
     {
         return !in_array($state, array(Job::COMPLETED, Job::FAILED, Job::ROLLED_BACK), true);
+    }
+
+    private function releaseLock(string $job_id, string $owner_token): void
+    {
+        try {
+            $this->lock->release($job_id, $owner_token);
+        } catch (Throwable $throwable) {
+            // The expiring lease permits recovery; preserve the backup result.
+        }
     }
 }
