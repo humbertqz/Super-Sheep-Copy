@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace SuperSheepCopy\Jobs;
 
-final class OptionJobRepository implements JobRepositoryInterface
+final class OptionJobRepository implements JobRepositoryInterface, RefreshableJobRepositoryInterface
 {
     private const OPTION = 'super_sheep_copy_jobs';
 
@@ -44,6 +44,11 @@ final class OptionJobRepository implements JobRepositoryInterface
         }
 
         return $jobs;
+    }
+
+    public function refresh(): void
+    {
+        wp_cache_delete(self::OPTION, 'options');
     }
 
     /**

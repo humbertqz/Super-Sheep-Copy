@@ -11,13 +11,9 @@ interface BackupJobLockStoreInterface
      */
     public function add(string $name, array $value): bool;
 
-    /**
-     * @return array<string,mixed>|null
-     */
-    public function get(string $name): ?array;
+    /** @return mixed */
+    public function get(string $name);
 
-    /**
-     * @param array<string,mixed> $expected
-     */
-    public function deleteIfUnchanged(string $name, array $expected): bool;
+    /** @param mixed $expected */
+    public function deleteIfUnchanged(string $name, $expected): bool;
 }

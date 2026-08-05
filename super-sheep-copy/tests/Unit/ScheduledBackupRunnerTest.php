@@ -10,6 +10,7 @@ use SuperSheepCopy\Backup\BackupStepRunnerInterface;
 use SuperSheepCopy\Backup\Lock\BackupJobExecutionLockInterface;
 use SuperSheepCopy\Jobs\Job;
 use SuperSheepCopy\Jobs\JobRepositoryInterface;
+use SuperSheepCopy\Jobs\RefreshableJobRepositoryInterface;
 use SuperSheepCopy\Schedule\ScheduleSettings;
 use SuperSheepCopy\Schedule\ScheduleSettingsRepository;
 use SuperSheepCopy\Schedule\ScheduledBackupRunner;
@@ -127,6 +128,19 @@ final class ScheduledBackupRunnerTest extends TestCase
         self::assertSame('completed', (new ScheduleSettingsRepository())->get()->lastStatus());
     }
 
+    public function testReloadsAuthoritativeJobStateAfterEachAcquisition(): void
+    {
+        $job = new Job('backup-scheduled', 'backup', Job::CREATED, array('trigger' => 'scheduled'));
+        $jobs = new ScheduleRunnerJobRepository(array($job));
+        $jobs->replaceOnRefresh(new Job('backup-scheduled', 'backup', Job::PACKAGING_ARCHIVE, array('trigger' => 'scheduled')));
+        $step_runner = new ScheduleRunnerStepRunner(Job::COMPLETED);
+
+        $this->runner($jobs, $step_runner)->handleContinuationEvent();
+
+        self::assertSame(1, $jobs->refresh_calls);
+        self::assertSame(array(Job::PACKAGING_ARCHIVE), $step_runner->received_states);
+    }
+
     private function runner(
         ScheduleRunnerJobRepository $jobs,
         ScheduleRunnerStepRunner $step_runner,
@@ -147,10 +161,12 @@ final class ScheduledBackupRunnerTest extends TestCase
     }
 }
 
-final class ScheduleRunnerJobRepository implements JobRepositoryInterface
+final class ScheduleRunnerJobRepository implements JobRepositoryInterface, RefreshableJobRepositoryInterface
 {
     /** @var array<string,Job> */
     private array $jobs = array();
+    public int $refresh_calls = 0;
+    private ?Job $replacement_on_refresh = null;
 
     /**
      * @param Job[] $jobs
@@ -181,6 +197,20 @@ final class ScheduleRunnerJobRepository implements JobRepositoryInterface
     {
         return array_values($this->jobs);
     }
+
+    public function replaceOnRefresh(Job $job): void
+    {
+        $this->replacement_on_refresh = $job;
+    }
+
+    public function refresh(): void
+    {
+        $this->refresh_calls++;
+        if ($this->replacement_on_refresh !== null) {
+            $this->save($this->replacement_on_refresh);
+            $this->replacement_on_refresh = null;
+        }
+    }
 }
 
 final class ScheduleRunnerMetadataCollector implements BackupMetadataCollectorInterface
@@ -194,6 +224,8 @@ final class ScheduleRunnerMetadataCollector implements BackupMetadataCollectorIn
 final class ScheduleRunnerStepRunner implements BackupStepRunnerInterface
 {
     public int $calls = 0;
+    /** @var string[] */
+    public array $received_states = array();
     private string $next_state;
 
     public function __construct(string $next_state = Job::EXPORTING_DATABASE)
@@ -204,6 +236,7 @@ final class ScheduleRunnerStepRunner implements BackupStepRunnerInterface
     public function runStep(Job $job): Job
     {
         $this->calls++;
+        $this->received_states[] = $job->state();
         $payload = $job->payload();
         $payload['updated_at'] = gmdate('c');
 

@@ -20,14 +20,17 @@ final class WordPressOptionBackupJobLockStore implements BackupJobLockStoreInter
         return add_option($name, $value, '', 'no');
     }
 
-    public function get(string $name): ?array
+    /** @return mixed */
+    public function get(string $name)
     {
-        $value = get_option($name, null);
+        $missing = new \stdClass();
+        $value = get_option($name, $missing);
 
-        return is_array($value) ? $value : null;
+        return $value === $missing ? null : $value;
     }
 
-    public function deleteIfUnchanged(string $name, array $expected): bool
+    /** @param mixed $expected */
+    public function deleteIfUnchanged(string $name, $expected): bool
     {
         $deleted = $this->wpdb->delete(
             $this->wpdb->options,

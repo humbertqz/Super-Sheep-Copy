@@ -10,6 +10,7 @@ use SuperSheepCopy\Backup\BackupJobSiteGuard;
 use SuperSheepCopy\Backup\Lock\BackupJobExecutionLockInterface;
 use SuperSheepCopy\Jobs\Job;
 use SuperSheepCopy\Jobs\JobRepositoryInterface;
+use SuperSheepCopy\Jobs\RefreshableJobRepositoryInterface;
 use SuperSheepCopy\Plugin;
 use SuperSheepCopy\Security\Capability;
 use SuperSheepCopy\Security\Nonce;
@@ -43,52 +44,58 @@ final class BackupStepAjaxHandler
         $this->nonce->verifyRequest();
 
         $job_id = isset($_REQUEST['job_id']) ? sanitize_text_field(wp_unslash($_REQUEST['job_id'])) : '';
-        $job = $this->jobs->find($job_id);
-
-        if ($job === null) {
-            wp_send_json_error(array('job_id' => $job_id), 404);
-        }
-
-        if ((new BackupJobSiteGuard())->isForeignRunningBackupJob($job, defined('ABSPATH') ? ABSPATH : '', Plugin::backupDirectory())) {
-            $payload = $job->payload();
-            $payload['message'] = 'Backup failed: job belongs to a different site or upload directory.';
-            $payload['error'] = 'Job belongs to a different site or upload directory.';
-            $payload['failed_state'] = $job->state();
-            $job = new Job($job->id(), $job->type(), Job::FAILED, $payload);
-            $this->jobs->save($job);
-            wp_send_json_success($this->responsePayload($job));
-        }
-
-        $owner_token = $this->lock->acquire($job->id());
+        $owner_token = $this->lock->acquire($job_id);
         if ($owner_token === null) {
+            $this->refreshJobs();
+            $job = $this->jobs->find($job_id);
+            if ($job === null) {
+                wp_send_json_error(array('job_id' => $job_id), 404);
+            }
+
             $payload = $job->payload();
             $payload['message'] = 'Another backup step is still running.';
             $busy_job = new Job($job->id(), $job->type(), $job->state(), $payload);
             wp_send_json_success($this->responsePayload($busy_job));
         }
 
+        $job = null;
         try {
-            $retry = isset($_REQUEST['retry']) && sanitize_text_field(wp_unslash($_REQUEST['retry'])) === '1';
-            if ($retry && $job->state() === Job::FAILED) {
+            $this->refreshJobs();
+            $job = $this->jobs->find($job_id);
+            if ($job !== null && (new BackupJobSiteGuard())->isForeignRunningBackupJob($job, defined('ABSPATH') ? ABSPATH : '', Plugin::backupDirectory())) {
                 $payload = $job->payload();
-                $failed_state = isset($payload['failed_state']) && is_scalar($payload['failed_state']) ? (string) $payload['failed_state'] : Job::CREATED;
-                unset($payload['error']);
-                $payload['message'] = 'Retrying backup.';
-                $job = new Job($job->id(), $job->type(), $failed_state, $payload);
-            }
-
-            try {
-                $job = $this->runner->runStep($job);
-            } catch (Throwable $throwable) {
-                $payload = $job->payload();
-                $payload['message'] = 'Backup failed: ' . $throwable->getMessage();
-                $payload['error'] = $throwable->getMessage();
+                $payload['message'] = 'Backup failed: job belongs to a different site or upload directory.';
+                $payload['error'] = 'Job belongs to a different site or upload directory.';
                 $payload['failed_state'] = $job->state();
                 $job = new Job($job->id(), $job->type(), Job::FAILED, $payload);
                 $this->jobs->save($job);
+            } elseif ($job !== null) {
+                $retry = isset($_REQUEST['retry']) && sanitize_text_field(wp_unslash($_REQUEST['retry'])) === '1';
+                if ($retry && $job->state() === Job::FAILED) {
+                    $payload = $job->payload();
+                    $failed_state = isset($payload['failed_state']) && is_scalar($payload['failed_state']) ? (string) $payload['failed_state'] : Job::CREATED;
+                    unset($payload['error']);
+                    $payload['message'] = 'Retrying backup.';
+                    $job = new Job($job->id(), $job->type(), $failed_state, $payload);
+                }
+
+                try {
+                    $job = $this->runner->runStep($job);
+                } catch (Throwable $throwable) {
+                    $payload = $job->payload();
+                    $payload['message'] = 'Backup failed: ' . $throwable->getMessage();
+                    $payload['error'] = $throwable->getMessage();
+                    $payload['failed_state'] = $job->state();
+                    $job = new Job($job->id(), $job->type(), Job::FAILED, $payload);
+                    $this->jobs->save($job);
+                }
             }
         } finally {
-            $this->releaseLock($job->id(), $owner_token);
+            $this->releaseLock($job_id, $owner_token);
+        }
+
+        if ($job === null) {
+            wp_send_json_error(array('job_id' => $job_id), 404);
         }
 
         wp_send_json_success($this->responsePayload($job));
@@ -125,6 +132,13 @@ final class BackupStepAjaxHandler
             $this->lock->release($job_id, $owner_token);
         } catch (Throwable $throwable) {
             // The expiring lease permits recovery; preserve the backup result.
+        }
+    }
+
+    private function refreshJobs(): void
+    {
+        if ($this->jobs instanceof RefreshableJobRepositoryInterface) {
+            $this->jobs->refresh();
         }
     }
 }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace SuperSheepCopy\Backup\Lock;
 
 use Closure;
+use Throwable;
 
 final class BackupJobExecutionLock implements BackupJobExecutionLockInterface
 {
@@ -34,11 +35,15 @@ final class BackupJobExecutionLock implements BackupJobExecutionLockInterface
     public function acquire(string $job_id): ?string
     {
         $name = $this->optionName($job_id);
-        $owner = (string) ($this->token_generator)();
-        $value = array(
-            'owner' => $owner,
-            'expires_at' => (int) ($this->clock)() + $this->lease_seconds,
-        );
+        try {
+            $owner = (string) ($this->token_generator)();
+            $value = array(
+                'owner' => $owner,
+                'expires_at' => (int) ($this->clock)() + $this->lease_seconds,
+            );
+        } catch (Throwable $throwable) {
+            return null;
+        }
 
         if ($this->store->add($name, $value)) {
             return $owner;
@@ -46,7 +51,7 @@ final class BackupJobExecutionLock implements BackupJobExecutionLockInterface
 
         $existing = $this->store->get($name);
         if (
-            $existing !== null
+            is_array($existing)
             && isset($existing['expires_at'])
             && is_numeric($existing['expires_at'])
             && (int) $existing['expires_at'] > (int) ($this->clock)()
@@ -66,7 +71,7 @@ final class BackupJobExecutionLock implements BackupJobExecutionLockInterface
         $name = $this->optionName($job_id);
         $existing = $this->store->get($name);
         if (
-            $existing === null
+            !is_array($existing)
             || !isset($existing['owner'])
             || !is_scalar($existing['owner'])
             || !hash_equals((string) $existing['owner'], $owner_token)

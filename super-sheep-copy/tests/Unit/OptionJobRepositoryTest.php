@@ -13,6 +13,7 @@ final class OptionJobRepositoryTest extends TestCase
     protected function setUp(): void
     {
         $GLOBALS['ssc_test_options'] = array();
+        $GLOBALS['ssc_test_cache_deletes'] = array();
     }
 
     public function testDeletesJobById(): void
@@ -28,5 +29,16 @@ final class OptionJobRepositoryTest extends TestCase
         self::assertSame(array('restore-123'), array_map(static function (Job $job): string {
             return $job->id();
         }, $repository->all()));
+    }
+
+    public function testRefreshInvalidatesWordPressOptionCache(): void
+    {
+        $repository = new OptionJobRepository();
+
+        $repository->refresh();
+
+        self::assertSame(array(
+            array('super_sheep_copy_jobs', 'options'),
+        ), $GLOBALS['ssc_test_cache_deletes']);
     }
 }

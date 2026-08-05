@@ -62,6 +62,22 @@ final class BackupJobExecutionLockTest extends TestCase
         self::assertSame('owner-4', $lock->acquire('backup-123'));
     }
 
+    public function testTokenGenerationFailureLeavesJobUnlocked(): void
+    {
+        $store = new InMemoryBackupJobLockStore();
+        $lock = new BackupJobExecutionLock(
+            $store,
+            120,
+            new MutableLockClock(1000),
+            static function (): string {
+                throw new \RuntimeException('secure random source failed');
+            }
+        );
+
+        self::assertNull($lock->acquire('backup-123'));
+        self::assertNull($store->get($this->optionName('backup-123')));
+    }
+
     private function optionName(string $job_id): string
     {
         return 'super_sheep_copy_backup_lock_' . hash('sha256', $job_id);
@@ -70,10 +86,10 @@ final class BackupJobExecutionLockTest extends TestCase
 
 final class InMemoryBackupJobLockStore implements BackupJobLockStoreInterface
 {
-    /** @var array<string,array<string,mixed>> */
+    /** @var array<string,mixed> */
     private array $values;
 
-    /** @param array<string,array<string,mixed>> $values */
+    /** @param array<string,mixed> $values */
     public function __construct(array $values = array())
     {
         $this->values = $values;
@@ -90,12 +106,14 @@ final class InMemoryBackupJobLockStore implements BackupJobLockStoreInterface
         return true;
     }
 
-    public function get(string $name): ?array
+    /** @return mixed */
+    public function get(string $name)
     {
         return $this->values[$name] ?? null;
     }
 
-    public function deleteIfUnchanged(string $name, array $expected): bool
+    /** @param mixed $expected */
+    public function deleteIfUnchanged(string $name, $expected): bool
     {
         if (!isset($this->values[$name]) || $this->values[$name] !== $expected) {
             return false;

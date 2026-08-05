@@ -12,6 +12,7 @@ use SuperSheepCopy\Backup\Lock\BackupJobExecutionLockInterface;
 use SuperSheepCopy\Backup\Lock\WordPressOptionBackupJobLockStore;
 use SuperSheepCopy\Jobs\Job;
 use SuperSheepCopy\Jobs\JobRepositoryInterface;
+use SuperSheepCopy\Jobs\RefreshableJobRepositoryInterface;
 use SuperSheepCopy\Settings\BackupSettingsRepository;
 use Throwable;
 
@@ -86,17 +87,26 @@ final class ScheduledBackupRunner
         }
 
         for ($i = 0; $i < self::MAX_STEPS_PER_TICK; $i++) {
-            $owner_token = $this->lock->acquire($job->id());
+            $job_id = $job->id();
+            $owner_token = $this->lock->acquire($job_id);
             if ($owner_token === null) {
                 $this->events->scheduleContinuation();
                 return;
             }
 
             try {
-                $job = $this->step_runner->runStep($job);
-                $this->jobs->save($job);
+                $this->refreshJobs();
+                $job = $this->jobs->find($job_id);
+                if ($job !== null && $this->isScheduledRunningJob($job)) {
+                    $job = $this->step_runner->runStep($job);
+                    $this->jobs->save($job);
+                }
             } finally {
-                $this->releaseLock($job->id(), $owner_token);
+                $this->releaseLock($job_id, $owner_token);
+            }
+
+            if ($job === null) {
+                return;
             }
 
             if ($job->state() === Job::COMPLETED) {
@@ -106,6 +116,10 @@ final class ScheduledBackupRunner
 
             if ($job->state() === Job::FAILED) {
                 $this->recordLastRun('failed', 'Scheduled backup failed.');
+                return;
+            }
+
+            if (!$this->isScheduledRunningJob($job)) {
                 return;
             }
         }
@@ -178,12 +192,29 @@ final class ScheduledBackupRunner
         return !in_array($state, array(Job::COMPLETED, Job::FAILED, Job::ROLLED_BACK), true);
     }
 
+    private function isScheduledRunningJob(Job $job): bool
+    {
+        $payload = $job->payload();
+
+        return $job->type() === 'backup'
+            && isset($payload['trigger'])
+            && $payload['trigger'] === 'scheduled'
+            && $this->isRunningState($job->state());
+    }
+
     private function releaseLock(string $job_id, string $owner_token): void
     {
         try {
             $this->lock->release($job_id, $owner_token);
         } catch (Throwable $throwable) {
             // The expiring lease permits recovery; preserve the backup result.
+        }
+    }
+
+    private function refreshJobs(): void
+    {
+        if ($this->jobs instanceof RefreshableJobRepositoryInterface) {
+            $this->jobs->refresh();
         }
     }
 }

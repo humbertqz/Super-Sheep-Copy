@@ -15,6 +15,7 @@ use SuperSheepCopy\Backup\BackupRunnerInterface;
 use SuperSheepCopy\Backup\Lock\BackupJobExecutionLockInterface;
 use SuperSheepCopy\Jobs\Job;
 use SuperSheepCopy\Jobs\JobRepositoryInterface;
+use SuperSheepCopy\Jobs\RefreshableJobRepositoryInterface;
 use SuperSheepCopy\Restore\InstallerPreparationManagerInterface;
 use SuperSheepCopy\Restore\InstallerPreparationResult;
 use SuperSheepCopy\Restore\RestorePreparationManagerInterface;
@@ -236,6 +237,27 @@ final class BackupStepAjaxHandlerTest extends TestCase
         self::assertSame('Backup completed.', $GLOBALS['ssc_test_json_response']['data']['message']);
     }
 
+    public function testReloadsAuthoritativeJobStateAfterAcquiringLock(): void
+    {
+        $_REQUEST[Nonce::FIELD] = 'test-nonce';
+        $_REQUEST['job_id'] = 'backup-123';
+        $jobs = new BackupStepAjaxJobRepository(array(
+            new Job('backup-123', 'backup', Job::EXPORTING_DATABASE, array('message' => 'Old state.')),
+        ));
+        $jobs->replaceOnRefresh(new Job('backup-123', 'backup', Job::SCANNING_FILES, array('message' => 'Advanced state.')));
+        $runner = new BackupStepAjaxRunner();
+        $handler = new BackupStepAjaxHandler(new Capability(), new Nonce(), $jobs, $runner, new BackupStepAjaxLock());
+
+        try {
+            $handler->handle();
+        } catch (RuntimeException $exception) {
+            self::assertSame('wp_send_json_success', $exception->getMessage());
+        }
+
+        self::assertSame(1, $jobs->refresh_calls);
+        self::assertSame(Job::SCANNING_FILES, $runner->receivedJob()->state());
+    }
+
     public function testAdminMenuRegistersBackupStepAjaxAction(): void
     {
         $menu = new AdminMenu(
@@ -322,10 +344,12 @@ final class BackupStepAjaxLock implements BackupJobExecutionLockInterface
     }
 }
 
-final class BackupStepAjaxJobRepository implements JobRepositoryInterface
+final class BackupStepAjaxJobRepository implements JobRepositoryInterface, RefreshableJobRepositoryInterface
 {
     /** @var array<string,Job> */
     private array $jobs = array();
+    public int $refresh_calls = 0;
+    private ?Job $replacement_on_refresh = null;
 
     /**
      * @param list<Job> $jobs
@@ -355,6 +379,20 @@ final class BackupStepAjaxJobRepository implements JobRepositoryInterface
     public function all(): array
     {
         return array_values($this->jobs);
+    }
+
+    public function replaceOnRefresh(Job $job): void
+    {
+        $this->replacement_on_refresh = $job;
+    }
+
+    public function refresh(): void
+    {
+        $this->refresh_calls++;
+        if ($this->replacement_on_refresh !== null) {
+            $this->save($this->replacement_on_refresh);
+            $this->replacement_on_refresh = null;
+        }
     }
 }
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace SuperSheepCopy\Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
+use SuperSheepCopy\Backup\Lock\BackupJobExecutionLock;
 use SuperSheepCopy\Backup\Lock\WordPressOptionBackupJobLockStore;
 
 final class WordPressOptionBackupJobLockStoreTest extends TestCase
@@ -49,6 +50,25 @@ final class WordPressOptionBackupJobLockStoreTest extends TestCase
         self::assertFalse($store->deleteIfUnchanged('job-lock', array('owner' => 'old', 'expires_at' => 1)));
         self::assertSame(array(), $GLOBALS['ssc_test_cache_deletes']);
     }
+
+    public function testMalformedStoredValueCanBeReclaimed(): void
+    {
+        $name = 'super_sheep_copy_backup_lock_' . hash('sha256', 'backup-123');
+        $GLOBALS['ssc_test_options'][$name] = 'corrupt-lock-value';
+        $store = new WordPressOptionBackupJobLockStore(new LockStoreWpdb());
+        $lock = new BackupJobExecutionLock(
+            $store,
+            120,
+            static function (): int {
+                return 1000;
+            },
+            static function (): string {
+                return 'replacement-owner';
+            }
+        );
+
+        self::assertSame('replacement-owner', $lock->acquire('backup-123'));
+    }
 }
 
 final class LockStoreWpdb
@@ -72,6 +92,13 @@ final class LockStoreWpdb
     {
         $this->deleted_table = $table;
         $this->deleted_where = $where;
+        if (
+            $this->delete_result === 1
+            && isset($where['option_name'], $GLOBALS['ssc_test_options'][$where['option_name']])
+            && maybe_serialize($GLOBALS['ssc_test_options'][$where['option_name']]) === $where['option_value']
+        ) {
+            unset($GLOBALS['ssc_test_options'][$where['option_name']]);
+        }
 
         return $this->delete_result;
     }
