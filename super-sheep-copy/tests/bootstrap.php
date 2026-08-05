@@ -263,6 +263,36 @@ if (!function_exists('get_option')) {
     }
 }
 
+if (!function_exists('add_option')) {
+    function add_option(string $name, $value = '', string $deprecated = '', $autoload = null): bool
+    {
+        $GLOBALS['ssc_test_add_option_calls'][] = array($name, $value, $deprecated, $autoload);
+        if (array_key_exists($name, $GLOBALS['ssc_test_options'])) {
+            return false;
+        }
+
+        $GLOBALS['ssc_test_options'][$name] = $value;
+
+        return true;
+    }
+}
+
+if (!function_exists('maybe_serialize')) {
+    function maybe_serialize($value): string
+    {
+        return is_array($value) || is_object($value) ? serialize($value) : (string) $value;
+    }
+}
+
+if (!function_exists('wp_cache_delete')) {
+    function wp_cache_delete(string $key, string $group = ''): bool
+    {
+        $GLOBALS['ssc_test_cache_deletes'][] = array($key, $group);
+
+        return true;
+    }
+}
+
 if (!function_exists('update_option')) {
     function update_option(string $name, $value, bool $autoload = true): bool
     {
