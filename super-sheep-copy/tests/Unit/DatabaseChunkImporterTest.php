@@ -7,6 +7,7 @@ namespace SuperSheepCopy\Tests\Unit;
 use PHPUnit\Framework\TestCase;
 
 require_once dirname(__DIR__, 2) . '/installer/restore-engine/DatabaseChunkImporter.php';
+require_once dirname(__DIR__, 2) . '/installer/restore-engine/LegacyZeroDateDefaultDetector.php';
 require_once dirname(__DIR__, 2) . '/installer/restore-engine/SqlTableNameRewriter.php';
 
 final class DatabaseChunkImporterTest extends TestCase
@@ -93,7 +94,12 @@ final class DatabaseChunkImporterTest extends TestCase
             "INSERT INTO `ssc_tmp_hash_wp_posts` (`post_title`) VALUES ('semi; colon')",
         ), $connection->statements);
         self::assertSame('utf8mb4', $connection->charset);
-        self::assertSame(array('set_charset:utf8mb4', 'query', 'query', 'query'), $connection->events);
+        self::assertSame(array(
+            'set_charset:utf8mb4',
+            'query:DROP TABLE IF EXISTS `ssc_tmp_hash_wp_posts`',
+            'query:CREATE TABLE `ssc_tmp_hash_wp_posts` (`ID` bigint)',
+            "query:INSERT INTO `ssc_tmp_hash_wp_posts` (`post_title`) VALUES ('semi; colon')",
+        ), $connection->events);
         self::assertTrue($connection->closed);
     }
 
@@ -149,6 +155,43 @@ final class DatabaseChunkImporterTest extends TestCase
             'DROP TABLE IF EXISTS `ssc_tmp_hash_wp_posts`',
             'CREATE TABLE `ssc_tmp_hash_wp_posts` (`ID` bigint)',
         ), $connection->statements);
+    }
+
+    public function testUsesSessionOnlyCompatibilityForLegacyZeroDateSchemas(): void
+    {
+        $connection = new DatabaseChunkImporterFakeConnection();
+        $connection->session_sql_mode = 'STRICT_TRANS_TABLES,NO_ZERO_DATE,NO_ZERO_IN_DATE';
+        $importer = new class($connection) extends \SuperSheepCopyInstaller\DatabaseChunkImporter {
+            private DatabaseChunkImporterFakeConnection $connection;
+
+            public function __construct(DatabaseChunkImporterFakeConnection $connection)
+            {
+                $this->connection = $connection;
+            }
+
+            protected function connect(array $credentials)
+            {
+                return $this->connection;
+            }
+        };
+
+        $result = $importer->import(
+            array('host' => 'localhost', 'user' => 'root', 'password' => '', 'name' => 'wordpress', 'charset' => 'utf8mb4'),
+            array(array('name' => 'wp_actionscheduler_actions', 'chunks' => array('wp_actionscheduler_actions.part001.sql'))),
+            array('wp_actionscheduler_actions.part001.sql' => "DROP TABLE IF EXISTS `wp_actionscheduler_actions`;\n"
+                . "CREATE TABLE `wp_actionscheduler_actions` (`scheduled_date_gmt` datetime DEFAULT '0000-00-00 00:00:00');"),
+            array('wp_actionscheduler_actions' => 'ssc_tmp_hash_wp_actionscheduler_actions'),
+            new \SuperSheepCopyInstaller\SqlTableNameRewriter()
+        );
+
+        self::assertTrue($result['imported']);
+        self::assertSame(array(
+            'set_charset:utf8mb4',
+            'query:SELECT @@SESSION.sql_mode',
+            "query:SET SESSION sql_mode = 'STRICT_TRANS_TABLES'",
+            'query:DROP TABLE IF EXISTS `ssc_tmp_hash_wp_actionscheduler_actions`',
+            "query:CREATE TABLE `ssc_tmp_hash_wp_actionscheduler_actions` (`scheduled_date_gmt` datetime DEFAULT '0000-00-00 00:00:00')",
+        ), $connection->events);
     }
 
     public function testNormalizesCreateTableCharsetAndCollationToDestination(): void
@@ -267,6 +310,40 @@ final class DatabaseChunkImporterTest extends TestCase
         self::assertStringNotContainsString('secret_password', $result['warnings'][0]);
     }
 
+    public function testReportsPacketFailureStatementSizeWithoutCredentials(): void
+    {
+        $connection = new DatabaseChunkImporterFakeConnection();
+        $connection->fail_on_statement = 1;
+        $connection->errno = 2006;
+        $connection->error = 'MySQL server has gone away';
+        $importer = new class($connection) extends \SuperSheepCopyInstaller\DatabaseChunkImporter {
+            private DatabaseChunkImporterFakeConnection $connection;
+
+            public function __construct(DatabaseChunkImporterFakeConnection $connection)
+            {
+                $this->connection = $connection;
+            }
+
+            protected function connect(array $credentials)
+            {
+                return $this->connection;
+            }
+        };
+        $statement = 'CREATE TABLE `wp_posts` (`ID` bigint)';
+
+        $result = $importer->import(
+            array('host' => 'localhost', 'user' => 'secret_user', 'password' => 'secret_password', 'name' => 'wordpress'),
+            array(array('name' => 'wp_posts', 'chunks' => array('wp_posts.part001.sql'))),
+            array('wp_posts.part001.sql' => $statement . ';'),
+            array('wp_posts' => 'ssc_tmp_hash_wp_posts'),
+            new \SuperSheepCopyInstaller\SqlTableNameRewriter()
+        );
+
+        self::assertStringContainsString('The failed statement is ' . strlen('CREATE TABLE `ssc_tmp_hash_wp_posts` (`ID` bigint)') . ' bytes;', $result['warnings'][0]);
+        self::assertStringNotContainsString('secret_user', $result['warnings'][0]);
+        self::assertStringNotContainsString('secret_password', $result['warnings'][0]);
+    }
+
     public function testFailsWhenTableImportDoesNotCreateExpectedStagingTable(): void
     {
         $connection = new DatabaseChunkImporterFakeConnection();
@@ -311,6 +388,7 @@ final class DatabaseChunkImporterFakeConnection
     public string $error = '';
     public string $charset = '';
     public int $query_delay_microseconds = 0;
+    public string $session_sql_mode = '';
 
     /** @var list<string> */
     public array $events = array();
@@ -323,13 +401,17 @@ final class DatabaseChunkImporterFakeConnection
         return true;
     }
 
-    public function query(string $statement): bool
+    public function query(string $statement)
     {
         if ($this->query_delay_microseconds > 0) {
             usleep($this->query_delay_microseconds);
         }
         $this->statements[] = $statement;
-        $this->events[] = 'query';
+        $this->events[] = 'query:' . $statement;
+
+        if ($statement === 'SELECT @@SESSION.sql_mode') {
+            return new DatabaseChunkImporterFakeResult($this->session_sql_mode);
+        }
 
         if ($this->fail_on_statement === count($this->statements)) {
             return false;
@@ -341,5 +423,21 @@ final class DatabaseChunkImporterFakeConnection
     public function close(): void
     {
         $this->closed = true;
+    }
+}
+
+final class DatabaseChunkImporterFakeResult
+{
+    private string $sql_mode;
+
+    public function __construct(string $sql_mode)
+    {
+        $this->sql_mode = $sql_mode;
+    }
+
+    /** @return array{0:string} */
+    public function fetch_row(): array
+    {
+        return array($this->sql_mode);
     }
 }

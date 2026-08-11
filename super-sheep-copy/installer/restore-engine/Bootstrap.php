@@ -41,6 +41,7 @@ require_once __DIR__ . '/RollbackDatabaseDumper.php';
 require_once __DIR__ . '/RollbackPreparationManager.php';
 require_once __DIR__ . '/DatabaseImportManifestReader.php';
 require_once __DIR__ . '/SqlTableNameRewriter.php';
+require_once __DIR__ . '/LegacyZeroDateDefaultDetector.php';
 require_once __DIR__ . '/DatabaseChunkImporter.php';
 require_once __DIR__ . '/DatabaseImportPreparationManager.php';
 require_once __DIR__ . '/DatabaseTableInspector.php';

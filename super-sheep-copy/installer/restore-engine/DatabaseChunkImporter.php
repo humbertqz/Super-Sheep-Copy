@@ -29,6 +29,12 @@ class DatabaseChunkImporter
             return $this->stepResult(false, false, $cursor, 0, 0, 0, array('Database connection failed.'));
         }
         $this->setConnectionCharset($mysqli, $credentials);
+        $compatibility_warning = $this->configureLegacyZeroDateCompatibility($mysqli, $chunks);
+        if ($compatibility_warning !== null) {
+            $mysqli->close();
+
+            return $this->stepResult(false, false, $cursor, 0, 0, 0, array($compatibility_warning));
+        }
         $table_index = isset($cursor['table_index']) ? max(0, (int) $cursor['table_index']) : 0;
         $chunk_index = isset($cursor['chunk_index']) ? max(0, (int) $cursor['chunk_index']) : 0;
         $statement_index = isset($cursor['statement_index']) ? max(0, (int) $cursor['statement_index']) : 0;
@@ -96,6 +102,12 @@ class DatabaseChunkImporter
             return $this->result(false, 0, 0, 0, array('Database connection failed.'));
         }
         $this->setConnectionCharset($mysqli, $credentials);
+        $compatibility_warning = $this->configureLegacyZeroDateCompatibility($mysqli, $chunks);
+        if ($compatibility_warning !== null) {
+            $mysqli->close();
+
+            return $this->result(false, 0, 0, 0, array($compatibility_warning));
+        }
 
         $statement_count = 0;
         $chunk_count = 0;
@@ -316,13 +328,47 @@ class DatabaseChunkImporter
         $snippet = preg_replace('/\\s+/', ' ', trim($statement));
         $snippet = $snippet === null ? '' : substr($snippet, 0, 220);
 
-        return sprintf(
+        $warning = sprintf(
             'Database import statement failed for %s in table %s.%s Statement: %s',
             $chunk_name,
             $table_name,
             $mysql_error,
             $snippet
         );
+
+        if ($errno === 2006) {
+            $warning .= ' The failed statement is ' . strlen($statement) . ' bytes; check max_allowed_packet or the MySQL error log if the server cannot reconnect.';
+        }
+
+        return $warning;
+    }
+
+    /**
+     * @param array<string,string> $chunks
+     */
+    private function configureLegacyZeroDateCompatibility(object $mysqli, array $chunks): ?string
+    {
+        if (!(new LegacyZeroDateDefaultDetector())->requiresCompatibility($chunks)) {
+            return null;
+        }
+
+        $result = $mysqli->query('SELECT @@SESSION.sql_mode');
+        if ($result === false || !method_exists($result, 'fetch_row')) {
+            return 'Database import requires legacy zero-date compatibility, but the installer could not inspect this connection\'s SQL mode.';
+        }
+
+        $row = $result->fetch_row();
+        $mode = isset($row[0]) && is_scalar($row[0]) ? (string) $row[0] : '';
+        $modes = array_filter(array_map('trim', explode(',', $mode)), static function (string $item): bool {
+            return $item !== '' && $item !== 'NO_ZERO_DATE' && $item !== 'NO_ZERO_IN_DATE';
+        });
+        $session_mode = implode(',', $modes);
+        $statement = "SET SESSION sql_mode = '" . str_replace("'", "''", $session_mode) . "'";
+        if (!$mysqli->query($statement)) {
+            return 'Database import requires legacy zero-date compatibility, but the installer could not update this connection\'s SQL mode.';
+        }
+
+        return null;
     }
 
     /**
