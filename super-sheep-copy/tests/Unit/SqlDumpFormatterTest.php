@@ -52,4 +52,39 @@ final class SqlDumpFormatterTest extends TestCase
 
         self::assertSame('', (new SqlDumpFormatter())->formatRows($rows));
     }
+
+    public function testSplitsRowsIntoMultipleInsertStatementsBelowConfiguredLimit(): void
+    {
+        $rows = new TableRows(
+            'wp_posts',
+            array('ID', 'post_content'),
+            array(
+                array('ID' => 1, 'post_content' => str_repeat('a', 30)),
+                array('ID' => 2, 'post_content' => str_repeat('b', 30)),
+            )
+        );
+
+        $sql = (new SqlDumpFormatter(100))->formatRows($rows);
+
+        self::assertSame(2, substr_count($sql, 'INSERT INTO `wp_posts`'));
+        self::assertStringContainsString("(1, '" . str_repeat('a', 30) . "')", $sql);
+        self::assertStringContainsString("(2, '" . str_repeat('b', 30) . "')", $sql);
+        foreach (array_filter(explode(";\n", $sql)) as $statement) {
+            self::assertLessThanOrEqual(100, strlen($statement . ";\n"));
+        }
+    }
+
+    public function testRejectsSingleRowThatExceedsConfiguredInsertLimit(): void
+    {
+        $rows = new TableRows(
+            'wp_posts',
+            array('ID', 'post_content'),
+            array(array('ID' => 1, 'post_content' => str_repeat('a', 90)))
+        );
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Single row for table wp_posts exceeds the maximum INSERT statement size.');
+
+        (new SqlDumpFormatter(100))->formatRows($rows);
+    }
 }
