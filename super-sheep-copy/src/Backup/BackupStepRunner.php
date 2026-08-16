@@ -207,12 +207,11 @@ final class BackupStepRunner implements BackupStepRunnerInterface
     {
         $payload = $job->payload();
         $metadata = isset($payload['manifest_metadata']) && is_array($payload['manifest_metadata']) ? $payload['manifest_metadata'] : array();
-        $files = $this->scannedFilesFromPayload($payload);
         $payload = $this->packager->packageStep(
             $job->id(),
             $this->stringPayload($payload, 'working_directory'),
             $this->stringPayload($payload, 'database_directory'),
-            $files,
+            array(),
             $metadata,
             $payload
         );
@@ -394,48 +393,6 @@ final class BackupStepRunner implements BackupStepRunnerInterface
             isset($data['size']) ? (int) $data['size'] : 0,
             isset($data['symlink']) ? (bool) $data['symlink'] : false
         );
-    }
-
-    /**
-     * @param array<string,mixed> $payload
-     * @return ScannedFile[]
-     */
-    private function scannedFilesFromPayload(array $payload): array
-    {
-        if (isset($payload['scanned_files_path']) && is_scalar($payload['scanned_files_path']) && (string) $payload['scanned_files_path'] !== '') {
-            return $this->scannedFilesFromManifest((string) $payload['scanned_files_path']);
-        }
-
-        return array_map(array($this, 'fileFromArray'), isset($payload['scanned_files']) && is_array($payload['scanned_files']) ? $payload['scanned_files'] : array());
-    }
-
-    /**
-     * @return ScannedFile[]
-     */
-    private function scannedFilesFromManifest(string $path): array
-    {
-        if (!is_file($path)) {
-            throw new RuntimeException('Missing scanned files manifest: ' . esc_html($path));
-        }
-
-        $lines = file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-        if ($lines === false) {
-            throw new RuntimeException('Unable to read scanned files manifest: ' . esc_html($path));
-        }
-
-        $files = array();
-        foreach ($lines as $line) {
-            $data = json_decode((string) $line, true);
-            if (is_array($data)) {
-                $files[] = $this->fileFromArray($data);
-            }
-        }
-
-        usort($files, static function (ScannedFile $a, ScannedFile $b): int {
-            return strcmp($a->relativePath(), $b->relativePath());
-        });
-
-        return $files;
     }
 
     /**

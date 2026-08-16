@@ -84,6 +84,30 @@ final class BackupArchiveStepPackagerTest extends TestCase
         $zip->close();
     }
 
+    public function testPackagesScannedFileManifestInBoundedBatches(): void
+    {
+        if (!class_exists(ZipArchive::class)) {
+            self::markTestSkipped('ZipArchive is not available.');
+        }
+
+        $manifest_path = $this->root . '/working/files.jsonl';
+        file_put_contents($manifest_path, implode("\n", array(
+            json_encode(array('absolute_path' => $this->root . '/site/uploads/a.txt', 'relative_path' => 'uploads/a.txt', 'size' => 1, 'symlink' => false)),
+            json_encode(array('absolute_path' => $this->root . '/site/uploads/b.txt', 'relative_path' => 'uploads/b.txt', 'size' => 1, 'symlink' => false)),
+        )) . "\n");
+        $packager = new BackupArchiveStepPackager(new ManifestBuilder('0.1.0', '1'), 1);
+
+        $payload = $packager->packageStep('backup-123', $this->root . '/working', $this->root . '/working/database', array(), $this->metadata(), array(
+            'scanned_files_path' => $manifest_path,
+            'scanned_file_count' => 2,
+        ));
+
+        self::assertFalse($payload['archive_complete']);
+        self::assertSame(1, $payload['archive_index']);
+        self::assertSame(2, $payload['archive_site_file_count']);
+        self::assertStringContainsString('"path":"files/uploads/a.txt"', (string) file_get_contents($payload['archive_checksums_path']));
+    }
+
     public function testPackagesDirectoryPackageAcrossMultipleBoundedSteps(): void
     {
         $packager = new BackupArchiveStepPackager(
@@ -327,7 +351,7 @@ final class BackupArchiveStepPackagerTest extends TestCase
         self::assertArrayNotHasKey('archive_entries', $payload);
         self::assertArrayNotHasKey('archive_checksums', $payload);
         self::assertStringContainsString('"archive_name":"files/uploads/a.txt"', (string) file_get_contents($payload['archive_entries_path']));
-        self::assertStringContainsString('"files\\/uploads\\/a.txt"', (string) file_get_contents($payload['archive_checksums_path']));
+        self::assertStringContainsString('"path":"files/uploads/a.txt"', (string) file_get_contents($payload['archive_checksums_path']));
 
         $payload = $packager->packageStep('backup-123', $this->root . '/working', $this->root . '/working/database', $site_files, $this->metadata(), $payload);
 
@@ -336,7 +360,7 @@ final class BackupArchiveStepPackagerTest extends TestCase
         self::assertArrayNotHasKey('archive_checksums', $payload);
     }
 
-    public function testPackagingMigratesLegacyPayloadArraysToManifestFiles(): void
+    public function testPackagingRejectsLegacyPayloadArrays(): void
     {
         if (!class_exists(ZipArchive::class)) {
             self::markTestSkipped('ZipArchive is not available.');
@@ -368,16 +392,10 @@ final class BackupArchiveStepPackagerTest extends TestCase
             'archive_started_at' => microtime(true),
         );
 
-        $packager = new BackupArchiveStepPackager(new ManifestBuilder('0.1.0', '1'), 1);
-        $payload = $packager->packageStep('backup-123', $this->root . '/working', $this->root . '/working/database', array(), $this->metadata(), $payload);
-
-        self::assertFalse($payload['archive_complete']);
-        self::assertArrayHasKey('archive_entries_path', $payload);
-        self::assertArrayHasKey('archive_checksums_path', $payload);
-        self::assertArrayNotHasKey('archive_entries', $payload);
-        self::assertArrayNotHasKey('archive_checksums', $payload);
-        self::assertFileExists($payload['archive_entries_path']);
-        self::assertFileExists($payload['archive_checksums_path']);
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Restart this backup to use streaming packaging.');
+        (new BackupArchiveStepPackager(new ManifestBuilder('0.1.0', '1'), 1))
+            ->packageStep('backup-123', $this->root . '/working', $this->root . '/working/database', array(), $this->metadata(), $payload);
     }
 
     /**

@@ -254,13 +254,15 @@ final class BackupStepRunnerTest extends TestCase
         $runner = $this->runnerWithPackager($jobs, new BackupArchiveStepPackager(new ManifestBuilder('0.1.0', '1'), 1));
         $payload = $this->payload();
         $payload['database_directory'] = $this->root . '/work/backup-123/database';
-        $payload['scanned_files'] = array(
-            array('absolute_path' => $this->root . '/site/index.php', 'relative_path' => 'index.php', 'size' => 5, 'symlink' => false),
-            array('absolute_path' => $this->root . '/site/readme.txt', 'relative_path' => 'readme.txt', 'size' => 6, 'symlink' => false),
-        );
+        $payload['scanned_files_path'] = $this->root . '/work/backup-123/files.jsonl';
+        $payload['scanned_file_count'] = 2;
         mkdir($payload['database_directory'] . '/chunks', 0777, true);
         file_put_contents($payload['database_directory'] . '/tables.json', '{}');
         file_put_contents($payload['database_directory'] . '/chunks/wp_posts.part001.sql', 'CREATE TABLE wp_posts;');
+        file_put_contents($payload['scanned_files_path'], implode("\n", array(
+            json_encode(array('absolute_path' => $this->root . '/site/index.php', 'relative_path' => 'index.php', 'size' => 5, 'symlink' => false)),
+            json_encode(array('absolute_path' => $this->root . '/site/readme.txt', 'relative_path' => 'readme.txt', 'size' => 6, 'symlink' => false)),
+        )) . "\n");
 
         $job = new Job('backup-123', 'backup', Job::PACKAGING_ARCHIVE, $payload);
         $job = $runner->runStep($job);
@@ -283,6 +285,24 @@ final class BackupStepRunnerTest extends TestCase
         $job = $runner->runStep($job);
         self::assertSame(Job::COMPLETED, $job->state(), (string) ($job->payload()['message'] ?? ''));
         self::assertSame('valid', $job->payload()['archive_validation_status']);
+    }
+
+    public function testPackagingPassesManifestPathWithoutMaterializingScannedFiles(): void
+    {
+        $jobs = new BackupStepRunnerJobRepository();
+        $packager = new BackupStepRunnerManifestRecordingPackager();
+        $runner = $this->runnerWithPackager($jobs, $packager);
+        $payload = $this->payload();
+        $payload['database_directory'] = $this->root . '/work/backup-123/database';
+        $payload['scanned_files_path'] = $this->root . '/work/backup-123/files.jsonl';
+        mkdir($payload['database_directory'] . '/chunks', 0777, true);
+        file_put_contents($payload['database_directory'] . '/tables.json', '{}');
+        file_put_contents($payload['scanned_files_path'], "{\"absolute_path\":\"/tmp/first\",\"relative_path\":\"first.txt\",\"size\":1,\"symlink\":false}\n");
+
+        $runner->runStep(new Job('backup-123', 'backup', Job::PACKAGING_ARCHIVE, $payload));
+
+        self::assertSame($payload['scanned_files_path'], $packager->received_manifest_path);
+        self::assertSame(0, $packager->received_file_count);
     }
 
     private function runner(BackupStepRunnerJobRepository $jobs): BackupStepRunner
@@ -496,6 +516,21 @@ final class BackupStepRunnerPackager implements BackupArchiveStepPackagerInterfa
         $payload['archive_complete'] = true;
         $payload['archive_validation_status'] = 'valid';
         $payload['message'] = 'Backup completed.';
+
+        return $payload;
+    }
+}
+
+final class BackupStepRunnerManifestRecordingPackager implements BackupArchiveStepPackagerInterface
+{
+    public string $received_manifest_path = '';
+    public int $received_file_count = -1;
+
+    public function packageStep(string $job_id, string $working_directory, string $database_directory, array $site_files, array $metadata, array $payload): array
+    {
+        $this->received_manifest_path = isset($payload['scanned_files_path']) ? (string) $payload['scanned_files_path'] : '';
+        $this->received_file_count = count($site_files);
+        $payload['archive_complete'] = false;
 
         return $payload;
     }

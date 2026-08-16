@@ -39,13 +39,13 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
 
     public function packageStep(string $job_id, string $working_directory, string $database_directory, array $site_files, array $metadata, array $payload): array
     {
+        if ($this->hasArchiveEntries($payload) && $this->archiveEntriesPath($payload) === '') {
+            throw new RuntimeException('Restart this backup to use streaming packaging.');
+        }
         if (!$this->hasArchiveEntries($payload)) {
             $payload = $this->preparePayload($job_id, $working_directory, $database_directory, $site_files, $payload);
         }
-        $payload = $this->migrateArchivePayloadState($working_directory, $payload);
-
         $archive_path = isset($payload['archive_path']) ? (string) $payload['archive_path'] : '';
-        $entries = $this->archiveEntriesFromPayload($payload);
         $index = isset($payload['archive_index']) ? (int) $payload['archive_index'] : 0;
         $step_start_index = $index;
         $step_start_time = microtime(true);
@@ -57,15 +57,14 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
         if (!isset($payload['archive_started_at'])) {
             $payload['archive_started_at'] = $step_start_time;
         }
-        $checksums = $this->checksumsFromPayload($payload);
         $writer = $this->writerForPayload($payload);
         $writer->open($this->writePathForPayload($archive_path, $payload));
 
         $effective_batch_size = $this->effectiveBatchSize($payload);
         $payload['archive_effective_batch_size'] = $effective_batch_size;
-        $limit = min(count($entries), $index + $effective_batch_size);
-        for (; $index < $limit; $index++) {
-            $entry = is_array($entries[$index]) ? $entries[$index] : array();
+        $entries = $this->readArchiveEntriesBatch($this->archiveEntriesPath($payload), $index, $effective_batch_size);
+        foreach ($entries as $entry) {
+            $index++;
             if (!empty($entry['symlink'])) {
                 continue;
             }
@@ -81,23 +80,22 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
                 throw new RuntimeException('Unable to calculate checksum for: ' . esc_html($archive_name));
             }
 
-            $checksums[$archive_name] = $checksum;
+            $this->appendChecksum((string) $payload['archive_checksums_path'], $archive_name, $checksum);
             $writer->addFile($absolute_path, $archive_name);
             $entry_size = filesize($absolute_path);
             if ($entry_size !== false) {
                 $step_bytes += (int) $entry_size;
             }
-            if ($index + 1 > $step_start_index && microtime(true) - $step_start_time >= $effective_time_budget) {
-                $index++;
+            if ($index > $step_start_index && microtime(true) - $step_start_time >= $effective_time_budget) {
                 break;
             }
         }
 
         $payload['archive_index'] = $index;
-        $payload = $this->persistChecksums($payload, $checksums);
-        $payload = $this->addProgressMetrics($payload, count($entries), $step_start_index, $step_start_time, $step_bytes);
+        $total_entries = isset($payload['archive_entry_count']) ? (int) $payload['archive_entry_count'] : 0;
+        $payload = $this->addProgressMetrics($payload, $total_entries, $step_start_index, $step_start_time, $step_bytes);
 
-        if ($index >= count($entries)) {
+        if ($index >= $total_entries) {
             $writer->close();
             $payload = $this->stabilizeMetadata($archive_path, $job_id, $metadata, $payload);
             if ((isset($payload['package_format']) ? (string) $payload['package_format'] : '') === 'tar.gz') {
@@ -111,7 +109,7 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
 
         $writer->close();
         $payload['archive_complete'] = false;
-        $payload['message'] = $this->progressMessage($payload, count($entries));
+        $payload['message'] = $this->progressMessage($payload, $total_entries);
 
         return $payload;
     }
@@ -124,14 +122,6 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
     private function preparePayload(string $job_id, string $working_directory, string $database_directory, array $site_files, array $payload): array
     {
         $database_files = $this->databaseFiles($database_directory);
-        $entries = array();
-
-        foreach ($site_files as $file) {
-            $entries[] = $this->entryForFile('files', $file);
-        }
-        foreach ($database_files as $file) {
-            $entries[] = $this->entryForFile('database', $file);
-        }
 
         $writer = $this->package_writer_factory->bestAvailableForCurrentEnvironment();
         $payload['package_format'] = $writer->format();
@@ -142,13 +132,15 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
             $payload['archive_staging_path'] = $payload['archive_path'] . '.staging';
         }
         $payload['archive_entries_path'] = rtrim($working_directory, '/\\') . '/archive-entries.jsonl';
-        $payload['archive_checksums_path'] = rtrim($working_directory, '/\\') . '/archive-checksums.json';
-        $this->writeArchiveEntries($payload['archive_entries_path'], $entries);
-        $this->writeChecksums($payload['archive_checksums_path'], array());
+        $payload['archive_checksums_path'] = rtrim($working_directory, '/\\') . '/archive-checksums.jsonl';
+        $this->writeArchiveEntriesFromSources($payload['archive_entries_path'], $site_files, $database_files, $payload);
+        if (file_put_contents($payload['archive_checksums_path'], '') === false) {
+            throw new RuntimeException('Unable to create archive checksums manifest.');
+        }
         unset($payload['archive_entries'], $payload['archive_checksums']);
-        $payload['archive_entry_count'] = count($entries);
+        $payload['archive_entry_count'] = (isset($payload['scanned_file_count']) ? (int) $payload['scanned_file_count'] : count($site_files)) + count($database_files);
         $payload['archive_index'] = 0;
-        $payload['archive_site_file_count'] = count($site_files);
+        $payload['archive_site_file_count'] = isset($payload['scanned_file_count']) ? (int) $payload['scanned_file_count'] : count($site_files);
         $payload['archive_database_file_count'] = count($database_files);
         $payload['archive_started_at'] = microtime(true);
 
@@ -389,6 +381,98 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
     }
 
     /**
+     * @param ScannedFile[] $site_files
+     * @param ScannedFile[] $database_files
+     * @param array<string,mixed> $payload
+     */
+    private function writeArchiveEntriesFromSources(string $path, array $site_files, array $database_files, array $payload): void
+    {
+        $handle = fopen($path, 'wb');
+        if ($handle === false) {
+            throw new RuntimeException('Unable to write archive entries manifest.');
+        }
+
+        $scanned_path = isset($payload['scanned_files_path']) ? (string) $payload['scanned_files_path'] : '';
+        if ($scanned_path !== '') {
+            $source = fopen($scanned_path, 'rb');
+            if ($source === false) {
+                fclose($handle);
+                throw new RuntimeException('Missing scanned files manifest. Restart this backup to use streaming packaging.');
+            }
+            while (($line = fgets($source)) !== false) {
+                $data = json_decode($line, true);
+                if (!is_array($data)) {
+                    continue;
+                }
+                $this->writeArchiveEntry($handle, array(
+                    'absolute_path' => isset($data['absolute_path']) ? (string) $data['absolute_path'] : '',
+                    'archive_name' => 'files/' . (isset($data['relative_path']) ? ltrim((string) $data['relative_path'], '/') : ''),
+                    'size' => isset($data['size']) ? (int) $data['size'] : 0,
+                    'symlink' => !empty($data['symlink']),
+                ));
+            }
+            fclose($source);
+        } else {
+            foreach ($site_files as $file) {
+                $this->writeArchiveEntry($handle, $this->entryForFile('files', $file));
+            }
+        }
+        foreach ($database_files as $file) {
+            $this->writeArchiveEntry($handle, $this->entryForFile('database', $file));
+        }
+        fclose($handle);
+    }
+
+    /** @param resource $handle @param array<string,mixed> $entry */
+    private function writeArchiveEntry($handle, array $entry): void
+    {
+        $encoded = json_encode($entry, JSON_UNESCAPED_SLASHES);
+        if (!is_string($encoded) || fwrite($handle, $encoded . "\n") === false) {
+            throw new RuntimeException('Unable to write archive entry.');
+        }
+    }
+
+    /** @return list<array<string,mixed>> */
+    private function readArchiveEntriesBatch(string $path, int $start, int $limit): array
+    {
+        $handle = fopen($path, 'rb');
+        if ($handle === false) {
+            throw new RuntimeException('Missing archive entries manifest. Restart this backup to use streaming packaging.');
+        }
+        $entries = array();
+        $line_number = 0;
+        while (($line = fgets($handle)) !== false) {
+            if ($line_number++ < $start) {
+                continue;
+            }
+            $entry = json_decode($line, true);
+            if (is_array($entry)) {
+                $entries[] = $entry;
+            }
+            if (count($entries) >= $limit) {
+                break;
+            }
+        }
+        fclose($handle);
+
+        return $entries;
+    }
+
+    /** @param array<string,mixed> $payload */
+    private function archiveEntriesPath(array $payload): string
+    {
+        return isset($payload['archive_entries_path']) ? (string) $payload['archive_entries_path'] : '';
+    }
+
+    private function appendChecksum(string $path, string $archive_name, string $checksum): void
+    {
+        $encoded = json_encode(array('path' => $archive_name, 'checksum' => $checksum), JSON_UNESCAPED_SLASHES);
+        if (!is_string($encoded) || file_put_contents($path, $encoded . "\n", FILE_APPEND) === false) {
+            throw new RuntimeException('Unable to append archive checksum.');
+        }
+    }
+
+    /**
      * @return list<array<string,mixed>>
      */
     private function readArchiveEntries(string $path): array
@@ -463,22 +547,18 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
             return array();
         }
 
-        $contents = file_get_contents($path);
-        if ($contents === false || trim($contents) === '') {
+        $handle = fopen($path, 'rb');
+        if ($handle === false) {
             return array();
         }
-
-        $decoded = json_decode($contents, true);
-        if (!is_array($decoded)) {
-            return array();
-        }
-
         $checksums = array();
-        foreach ($decoded as $entry_path => $checksum) {
-            if (is_scalar($checksum)) {
-                $checksums[(string) $entry_path] = (string) $checksum;
+        while (($line = fgets($handle)) !== false) {
+            $entry = json_decode($line, true);
+            if (is_array($entry) && isset($entry['path'], $entry['checksum']) && is_scalar($entry['path']) && is_scalar($entry['checksum'])) {
+                $checksums[(string) $entry['path']] = (string) $entry['checksum'];
             }
         }
+        fclose($handle);
 
         return $checksums;
     }
