@@ -30,6 +30,7 @@ final class ManifestBuilderTest extends TestCase
             'archive_size' => 1024,
             'checksums' => array('manifest.json' => 'abc123'),
             'exclusions' => array('.git', 'node_modules'),
+            'warnings' => array('One file changed during backup.'),
             'environment' => array('zip' => true),
         ));
 
@@ -39,5 +40,6 @@ final class ManifestBuilderTest extends TestCase
         self::assertSame('https://website.com', $manifest->toArray()['source_site_url']);
         self::assertFalse($manifest->toArray()['is_multisite']);
         self::assertSame(12, $manifest->toArray()['file_count']);
+        self::assertSame(array('One file changed during backup.'), $manifest->toArray()['warnings']);
     }
 }

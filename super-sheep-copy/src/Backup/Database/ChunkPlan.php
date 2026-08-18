@@ -17,6 +17,7 @@ final class ChunkPlan
     private int $limit;
     private ?int $offset;
     private int $chunk_number;
+    private ?int $upper_bound;
 
     public function __construct(
         string $table_name,
@@ -26,7 +27,8 @@ final class ChunkPlan
         ?int $last_seen_id,
         int $limit,
         ?int $offset,
-        int $chunk_number
+        int $chunk_number,
+        ?int $upper_bound = null
     ) {
         $this->table_name = $table_name;
         $this->file_name = $file_name;
@@ -36,6 +38,7 @@ final class ChunkPlan
         $this->limit = $limit;
         $this->offset = $offset;
         $this->chunk_number = $chunk_number;
+        $this->upper_bound = $upper_bound;
     }
 
     public function tableName(): string
@@ -76,5 +79,10 @@ final class ChunkPlan
     public function chunkNumber(): int
     {
         return $this->chunk_number;
+    }
+
+    public function upperBound(): ?int
+    {
+        return $this->upper_bound;
     }
 }

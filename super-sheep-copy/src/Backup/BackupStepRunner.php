@@ -109,6 +109,7 @@ final class BackupStepRunner implements BackupStepRunnerInterface
         $payload['database_last_seen_id'] = null;
         $payload['database_schemas'] = array();
         $payload['database_plans_by_table'] = array();
+        $payload['database_primary_key_upper_bounds'] = array();
         $payload['message'] = 'Starting database export.';
 
         return $this->save($job->id(), Job::EXPORTING_DATABASE, $payload);
@@ -137,8 +138,17 @@ final class BackupStepRunner implements BackupStepRunnerInterface
         $chunk_count = max(1, (int) ceil($schema->rowCount() / $chunk_size));
         $chunk_number = isset($payload['database_chunk_number']) ? (int) $payload['database_chunk_number'] : 1;
         $last_seen_id = isset($payload['database_last_seen_id']) && $payload['database_last_seen_id'] !== null ? (int) $payload['database_last_seen_id'] : null;
+        if (!isset($payload['database_primary_key_upper_bounds']) || !is_array($payload['database_primary_key_upper_bounds'])) {
+            $payload['database_primary_key_upper_bounds'] = array();
+        }
+        if ($schema->primaryKey() !== null && !array_key_exists($table, $payload['database_primary_key_upper_bounds'])) {
+            $payload['database_primary_key_upper_bounds'][$table] = $this->database->getPrimaryKeyUpperBound($schema);
+        }
+        $upper_bound = isset($payload['database_primary_key_upper_bounds'][$table])
+            ? (int) $payload['database_primary_key_upper_bounds'][$table]
+            : null;
 
-        $plan = $this->chunk_planner->plan($schema, $chunk_size, $chunk_number, $last_seen_id);
+        $plan = $this->chunk_planner->plan($schema, $chunk_size, $chunk_number, $last_seen_id, $upper_bound);
         $step_start = microtime(true);
         $rows = $this->database->fetchRows($plan, $columns);
         $sql = $chunk_number === 1 ? $this->formatter->formatSchema($schema) : '';
@@ -163,7 +173,13 @@ final class BackupStepRunner implements BackupStepRunnerInterface
             $last_seen_id = $this->lastSeenId($rows->rows(), $schema->primaryKey(), $last_seen_id);
         }
 
-        if ($chunk_number >= $chunk_count) {
+        // InnoDB row counts are estimates. Primary-key pagination has a reliable
+        // cursor, so use the returned batch to avoid silently truncating a live table.
+        $table_complete = $plan->strategy() === ChunkPlan::STRATEGY_PRIMARY_KEY
+            ? $step_rows < $chunk_size
+            : $chunk_number >= $chunk_count;
+
+        if ($table_complete) {
             $payload['database_table_index'] = $table_index + 1;
             $payload['database_chunk_number'] = 1;
             $payload['database_last_seen_id'] = null;
@@ -261,6 +277,10 @@ final class BackupStepRunner implements BackupStepRunnerInterface
         $started_at = isset($payload['backup_started_at']) && is_numeric($payload['backup_started_at']) ? (int) $payload['backup_started_at'] : $completed_at;
         $payload['backup_completed_at'] = $completed_at;
         $payload['backup_total_seconds'] = max(0, $completed_at - $started_at);
+        $changed_count = isset($payload['archive_changed_file_count']) ? (int) $payload['archive_changed_file_count'] : 0;
+        if ($changed_count > 0) {
+            $payload['message'] = 'Backup completed with warnings: ' . $changed_count . ' source file(s) changed during the backup.';
+        }
         $completed = $this->save($job_id, Job::COMPLETED, $payload);
         $this->cleanSuccessfulBackupRetention($payload);
 
@@ -439,6 +459,7 @@ final class BackupStepRunner implements BackupStepRunnerInterface
             'limit' => $plan->limit(),
             'offset' => $plan->offset(),
             'chunk_number' => $plan->chunkNumber(),
+            'upper_bound' => $plan->upperBound(),
         );
     }
 
@@ -455,7 +476,8 @@ final class BackupStepRunner implements BackupStepRunnerInterface
             isset($data['last_seen_id']) && $data['last_seen_id'] !== null ? (int) $data['last_seen_id'] : null,
             isset($data['limit']) ? (int) $data['limit'] : 1,
             isset($data['offset']) && $data['offset'] !== null ? (int) $data['offset'] : null,
-            isset($data['chunk_number']) ? (int) $data['chunk_number'] : 1
+            isset($data['chunk_number']) ? (int) $data['chunk_number'] : 1,
+            isset($data['upper_bound']) && $data['upper_bound'] !== null ? (int) $data['upper_bound'] : null
         );
     }
 

@@ -83,7 +83,7 @@ final class Plugin
 
         global $wpdb;
 
-        $environment_checker = new EnvironmentChecker();
+        $environment_checker = new EnvironmentChecker(self::backupDirectory());
         $jobs = new OptionJobRepository();
         $metadata_collector = new BackupMetadataCollector($environment_checker);
         $backup_lock = new BackupJobExecutionLock(new WordPressOptionBackupJobLockStore($wpdb));

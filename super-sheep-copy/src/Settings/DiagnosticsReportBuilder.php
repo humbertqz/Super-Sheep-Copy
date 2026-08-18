@@ -34,6 +34,7 @@ final class DiagnosticsReportBuilder
             $lines[] = 'Last backup size: ' . (isset($payload['archive_size']) ? (string) (int) $payload['archive_size'] : 'unknown');
             $lines[] = 'Last backup duration: ' . (isset($payload['backup_total_seconds']) ? (string) (int) $payload['backup_total_seconds'] : 'unknown');
             $lines[] = 'Skipped large files: ' . (isset($payload['skipped_large_file_count']) ? (string) (int) $payload['skipped_large_file_count'] : '0');
+            $lines[] = 'Files changed during backup: ' . (isset($payload['archive_changed_file_count']) ? (string) (int) $payload['archive_changed_file_count'] : '0');
         } else {
             $lines[] = 'Last backup: none';
         }

@@ -8,9 +8,26 @@ use SuperSheepCopy\Backup\Package\CliZipPackageWriter;
 
 final class EnvironmentChecker implements EnvironmentCheckerInterface
 {
+    private string $backup_directory;
+
+    public function __construct(string $backup_directory = '')
+    {
+        $this->backup_directory = $backup_directory;
+    }
+
     public function check(): array
     {
         $cli_zip_available = (new CliZipPackageWriter())->isAvailable();
+        $storage_path = $this->backup_directory !== '' ? $this->backup_directory : sys_get_temp_dir();
+        $storage_probe = is_dir($storage_path) ? $storage_path : dirname($storage_path);
+        while (!is_dir($storage_probe) && dirname($storage_probe) !== $storage_probe) {
+            $storage_probe = dirname($storage_probe);
+        }
+        $storage_writable = is_dir($storage_probe) && is_writable($storage_probe);
+        $free_bytes = function_exists('disk_free_space') ? disk_free_space($storage_probe) : false;
+        $free_space = $free_bytes === false
+            ? 'Unavailable'
+            : (function_exists('size_format') ? size_format((int) $free_bytes, 1) : (string) (int) $free_bytes . ' bytes');
 
         return array(
             'php_version' => array(
@@ -37,6 +54,16 @@ final class EnvironmentChecker implements EnvironmentCheckerInterface
                 'label' => 'Folder package fallback',
                 'value' => 'Available',
                 'status' => 'ok',
+            ),
+            'backup_storage' => array(
+                'label' => 'Backup storage writable',
+                'value' => $storage_writable ? 'Yes' : 'No',
+                'status' => $storage_writable ? 'ok' : 'error',
+            ),
+            'disk_free_space' => array(
+                'label' => 'Backup storage free space',
+                'value' => $free_space,
+                'status' => $free_bytes === false ? 'warning' : 'info',
             ),
             'memory_limit' => array(
                 'label' => 'PHP memory limit',

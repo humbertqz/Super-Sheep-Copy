@@ -33,6 +33,27 @@ final class WpdbDatabaseExporterRowsTest extends TestCase
         self::assertSame(array('SELECT * FROM `wp_posts` WHERE `ID` > %d ORDER BY `ID` ASC LIMIT %d', array(100, 100)), $client->prepared[0]);
     }
 
+    public function testBuildsPrimaryKeyQueryWithinCapturedUpperBound(): void
+    {
+        $client = new RowsFakeClient();
+        $exporter = new WpdbDatabaseExporter($client, new TableSelector());
+        $plan = new ChunkPlan('wp_posts', 'wp_posts.part002.sql', ChunkPlan::STRATEGY_PRIMARY_KEY, 'ID', 100, 100, null, 2, 250);
+
+        self::assertSame(
+            'SELECT * FROM `wp_posts` WHERE `ID` > 100 AND `ID` <= 250 ORDER BY `ID` ASC LIMIT 100',
+            $exporter->buildChunkQuery($plan)
+        );
+    }
+
+    public function testCapturesPrimaryKeyUpperBound(): void
+    {
+        $client = new RowsFakeClient(array(array('ssc_max_primary_key' => '250')));
+        $exporter = new WpdbDatabaseExporter($client, new TableSelector());
+        $schema = new \SuperSheepCopy\Backup\Database\TableSchema('wp_posts', 'CREATE TABLE `wp_posts` (`ID` bigint)', 'ID', 100, null, null);
+
+        self::assertSame(250, $exporter->getPrimaryKeyUpperBound($schema));
+    }
+
     public function testBuildsOffsetQuery(): void
     {
         $client = new RowsFakeClient();

@@ -56,8 +56,10 @@ final class DatabaseBackupCoordinator implements DatabaseBackupCoordinatorInterf
 
             $plans_by_table[$table] = array();
             $last_seen_id = null;
+            $upper_bound = $this->exporter->getPrimaryKeyUpperBound($schema);
 
-            for ($chunk_number = 1; $chunk_number <= $chunk_count; $chunk_number++) {
+            $is_primary_key_pagination = $schema->primaryKey() !== null && $schema->primaryKey() !== '';
+            for ($chunk_number = 1; ; $chunk_number++) {
                 $this->report($job_id, array(
                     'phase' => 'database',
                     'step' => 'chunk_started',
@@ -67,7 +69,7 @@ final class DatabaseBackupCoordinator implements DatabaseBackupCoordinatorInterf
                     'message' => 'Exporting chunk ' . $chunk_number . ' of ' . $chunk_count . ' for table ' . $table,
                 ));
 
-                $plan = $this->chunk_planner->plan($schema, $chunk_size, $chunk_number, $last_seen_id);
+                $plan = $this->chunk_planner->plan($schema, $chunk_size, $chunk_number, $last_seen_id, $upper_bound);
                 $rows = $this->exporter->fetchRows($plan, $columns);
                 $plans_by_table[$table][] = $plan;
 
@@ -87,6 +89,12 @@ final class DatabaseBackupCoordinator implements DatabaseBackupCoordinatorInterf
                     'chunk_total' => $chunk_count,
                     'message' => 'Finished chunk ' . $chunk_number . ' of ' . $chunk_count . ' for table ' . $table,
                 ));
+
+                // InnoDB row counts are estimates. A primary-key cursor can continue
+                // safely until the last partial batch, unlike offset pagination.
+                if (($is_primary_key_pagination && count($rows->rows()) < $chunk_size) || (!$is_primary_key_pagination && $chunk_number >= $chunk_count)) {
+                    break;
+                }
             }
 
             $this->report($job_id, array(

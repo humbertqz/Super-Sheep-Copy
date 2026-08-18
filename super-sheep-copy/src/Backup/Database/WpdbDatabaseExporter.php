@@ -57,6 +57,25 @@ final class WpdbDatabaseExporter
         return $this->client->getColumns($table);
     }
 
+    public function getPrimaryKeyUpperBound(TableSchema $schema): ?int
+    {
+        $primary_key = $schema->primaryKey();
+        if ($primary_key === null || $primary_key === '') {
+            return null;
+        }
+
+        $this->assertIdentifier($schema->name());
+        $this->assertIdentifier($primary_key);
+        $rows = $this->client->getRows(sprintf(
+            'SELECT MAX(`%s`) AS `ssc_max_primary_key` FROM `%s`',
+            $primary_key,
+            $schema->name()
+        ));
+        $value = $rows[0]['ssc_max_primary_key'] ?? null;
+
+        return is_numeric($value) ? (int) $value : null;
+    }
+
     public function buildChunkQuery(ChunkPlan $plan): string
     {
         $this->assertIdentifier($plan->tableName());
@@ -64,11 +83,26 @@ final class WpdbDatabaseExporter
         if ($plan->strategy() === ChunkPlan::STRATEGY_PRIMARY_KEY) {
             $primary_key = $plan->primaryKey();
             $this->assertIdentifier((string) $primary_key);
+            $upper_bound = $plan->upperBound();
 
             if ($plan->lastSeenId() === null) {
+                if ($upper_bound !== null) {
+                    return $this->client->prepare(
+                        sprintf('SELECT * FROM `%s` WHERE `%s` <= %%d ORDER BY `%s` ASC LIMIT %%d', $plan->tableName(), $primary_key, $primary_key),
+                        array($upper_bound, $plan->limit())
+                    );
+                }
+
                 return $this->client->prepare(
                     sprintf('SELECT * FROM `%s` ORDER BY `%s` ASC LIMIT %%d', $plan->tableName(), $primary_key),
                     array($plan->limit())
+                );
+            }
+
+            if ($upper_bound !== null) {
+                return $this->client->prepare(
+                    sprintf('SELECT * FROM `%s` WHERE `%s` > %%d AND `%s` <= %%d ORDER BY `%s` ASC LIMIT %%d', $plan->tableName(), $primary_key, $primary_key, $primary_key),
+                    array($plan->lastSeenId(), $upper_bound, $plan->limit())
                 );
             }
 

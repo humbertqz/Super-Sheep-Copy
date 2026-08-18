@@ -8,7 +8,7 @@ use InvalidArgumentException;
 
 final class ChunkPlanner
 {
-    public function plan(TableSchema $schema, int $chunk_size, int $chunk_number, ?int $last_seen_id): ChunkPlan
+    public function plan(TableSchema $schema, int $chunk_size, int $chunk_number, ?int $last_seen_id, ?int $upper_bound = null): ChunkPlan
     {
         if ($chunk_size < 1) {
             throw new InvalidArgumentException('Chunk size must be greater than zero.');
@@ -29,7 +29,8 @@ final class ChunkPlanner
                 $last_seen_id,
                 $chunk_size,
                 null,
-                $chunk_number
+                $chunk_number,
+                $upper_bound
             );
         }
 

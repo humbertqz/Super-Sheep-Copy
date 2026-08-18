@@ -45,6 +45,10 @@ final class ScheduleEventScheduler
             return;
         }
 
+        if (function_exists('wp_next_scheduled') && wp_next_scheduled(self::CONTINUE_HOOK) !== false) {
+            return;
+        }
+
         wp_schedule_single_event(time() + max(1, $delay_seconds), self::CONTINUE_HOOK);
     }
 

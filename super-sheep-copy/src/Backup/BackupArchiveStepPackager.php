@@ -75,6 +75,13 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
                 continue;
             }
 
+            clearstatcache(true, $absolute_path);
+            $current_size = filesize($absolute_path);
+            $scanned_size = isset($entry['size']) && is_numeric($entry['size']) ? (int) $entry['size'] : null;
+            if (strpos($archive_name, 'files/') === 0 && $current_size !== false && $scanned_size !== null && (int) $current_size !== $scanned_size) {
+                $payload = $this->recordChangedSource($payload, $archive_name);
+            }
+
             $checksum = hash_file('sha256', $absolute_path);
             if ($checksum === false) {
                 throw new RuntimeException('Unable to calculate checksum for: ' . esc_html($archive_name));
@@ -223,11 +230,35 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
         $metadata['package_extension'] = isset($payload['package_extension']) ? (string) $payload['package_extension'] : '.zip';
         $metadata['package_schema_version'] = 1;
         $metadata['checksums'] = $checksums;
+        $metadata['warnings'] = isset($metadata['warnings']) && is_array($metadata['warnings']) ? $metadata['warnings'] : array();
+        $changed_count = isset($payload['archive_changed_file_count']) ? (int) $payload['archive_changed_file_count'] : 0;
+        if ($changed_count > 0) {
+            $metadata['warnings'][] = $changed_count . ' source file(s) changed after the file scan and were archived in their newer state.';
+        }
 
         $writer->addString('manifest.json', $this->manifest_builder->build($metadata)->toJson());
         $writer->addString('checksums.json', (string) json_encode($checksums, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
         $writer->addString('logs/backup.log', 'Backup ' . $job_id . ' packaged.');
         $writer->close();
+    }
+
+    /** @param array<string,mixed> $payload @return array<string,mixed> */
+    private function recordChangedSource(array $payload, string $archive_name): array
+    {
+        $changed = isset($payload['archive_changed_files']) && is_array($payload['archive_changed_files'])
+            ? $payload['archive_changed_files']
+            : array();
+        if (!in_array($archive_name, $changed, true)) {
+            $payload['archive_changed_file_count'] = isset($payload['archive_changed_file_count'])
+                ? (int) $payload['archive_changed_file_count'] + 1
+                : 1;
+            if (count($changed) < 100) {
+                $changed[] = $archive_name;
+            }
+        }
+        $payload['archive_changed_files'] = $changed;
+
+        return $payload;
     }
 
     /**
@@ -732,6 +763,7 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
         return array(
             'absolute_path' => $file->absolutePath(),
             'archive_name' => $prefix . '/' . $file->relativePath(),
+            'size' => $file->size(),
             'symlink' => $file->isSymlink(),
         );
     }

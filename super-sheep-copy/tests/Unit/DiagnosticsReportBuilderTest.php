@@ -17,6 +17,7 @@ final class DiagnosticsReportBuilderTest extends TestCase
                 'archive_size' => 1048576,
                 'backup_total_seconds' => 12,
                 'skipped_large_file_count' => 2,
+                'archive_changed_file_count' => 1,
             )),
         ));
 
@@ -27,6 +28,7 @@ final class DiagnosticsReportBuilderTest extends TestCase
         self::assertStringContainsString('ZIP support:', $report);
         self::assertStringContainsString('Last backup: completed', $report);
         self::assertStringContainsString('Skipped large files: 2', $report);
+        self::assertStringContainsString('Files changed during backup: 1', $report);
     }
 
     public function testBuildReportDoesNotIncludeSecretLikePayloadValues(): void

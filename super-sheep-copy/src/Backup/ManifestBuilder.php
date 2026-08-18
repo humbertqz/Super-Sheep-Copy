@@ -43,6 +43,7 @@ final class ManifestBuilder
             'package_schema_version' => isset($metadata['package_schema_version']) ? (int) $metadata['package_schema_version'] : 1,
             'checksums' => (array) $metadata['checksums'],
             'exclusions' => array_values((array) $metadata['exclusions']),
+            'warnings' => array_values((array) ($metadata['warnings'] ?? array())),
             'environment' => (array) $metadata['environment'],
         ));
     }

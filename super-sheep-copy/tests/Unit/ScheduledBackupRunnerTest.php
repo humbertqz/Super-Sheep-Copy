@@ -63,6 +63,33 @@ final class ScheduledBackupRunnerTest extends TestCase
         self::assertStringContainsString('already running', $settings->lastMessage());
     }
 
+    public function testRegisterRepairsMissingContinuationForRunningScheduledBackup(): void
+    {
+        $jobs = new ScheduleRunnerJobRepository(array(
+            new Job('backup-scheduled', 'backup', Job::EXPORTING_DATABASE, array('trigger' => 'scheduled')),
+        ));
+
+        $this->runner($jobs, new ScheduleRunnerStepRunner())->register();
+
+        self::assertArrayHasKey('super_sheep_copy_scheduled_backup_continue', $GLOBALS['ssc_test_scheduled_events']);
+    }
+
+    public function testRegisterDoesNotDuplicateExistingContinuation(): void
+    {
+        $GLOBALS['ssc_test_scheduled_events']['super_sheep_copy_scheduled_backup_continue'] = array(
+            'timestamp' => 123,
+            'hook' => 'super_sheep_copy_scheduled_backup_continue',
+            'args' => array(),
+        );
+        $jobs = new ScheduleRunnerJobRepository(array(
+            new Job('backup-scheduled', 'backup', Job::EXPORTING_DATABASE, array('trigger' => 'scheduled')),
+        ));
+
+        $this->runner($jobs, new ScheduleRunnerStepRunner())->register();
+
+        self::assertSame(123, $GLOBALS['ssc_test_scheduled_events']['super_sheep_copy_scheduled_backup_continue']['timestamp']);
+    }
+
     public function testContinuationAdvancesScheduledJobAndRecordsCompletion(): void
     {
         $job = new Job('backup-scheduled', 'backup', Job::CREATED, array('trigger' => 'scheduled'));
@@ -128,6 +155,39 @@ final class ScheduledBackupRunnerTest extends TestCase
         self::assertSame('completed', (new ScheduleSettingsRepository())->get()->lastStatus());
     }
 
+    public function testFailedScheduledStepIsRetriedWithoutUserIntervention(): void
+    {
+        $job = new Job('backup-scheduled', 'backup', Job::PACKAGING_ARCHIVE, array('trigger' => 'scheduled'));
+        $jobs = new ScheduleRunnerJobRepository(array($job));
+        (new ScheduleSettingsRepository())->save(ScheduleSettings::fromArray(array('enabled' => true)));
+
+        $this->runner($jobs, new ScheduleRunnerFailingStepRunner())->handleContinuationEvent();
+
+        $retried = $jobs->find('backup-scheduled');
+        self::assertSame(Job::PACKAGING_ARCHIVE, $retried->state());
+        self::assertSame(1, $retried->payload()['scheduled_retry_count']);
+        self::assertSame('temporary archive failure', $retried->payload()['last_error']);
+        self::assertArrayHasKey('super_sheep_copy_scheduled_backup_continue', $GLOBALS['ssc_test_scheduled_events']);
+        self::assertSame('queued', (new ScheduleSettingsRepository())->get()->lastStatus());
+    }
+
+    public function testScheduledStepStopsAfterRetryLimit(): void
+    {
+        $job = new Job('backup-scheduled', 'backup', Job::PACKAGING_ARCHIVE, array(
+            'trigger' => 'scheduled',
+            'scheduled_retry_state' => Job::PACKAGING_ARCHIVE,
+            'scheduled_retry_count' => 3,
+        ));
+        $jobs = new ScheduleRunnerJobRepository(array($job));
+        (new ScheduleSettingsRepository())->save(ScheduleSettings::fromArray(array('enabled' => true)));
+
+        $this->runner($jobs, new ScheduleRunnerFailingStepRunner())->handleContinuationEvent();
+
+        self::assertSame(Job::FAILED, $jobs->find('backup-scheduled')->state());
+        self::assertSame('failed', (new ScheduleSettingsRepository())->get()->lastStatus());
+        self::assertArrayNotHasKey('super_sheep_copy_scheduled_backup_continue', $GLOBALS['ssc_test_scheduled_events']);
+    }
+
     public function testReloadsAuthoritativeJobStateAfterEachAcquisition(): void
     {
         $job = new Job('backup-scheduled', 'backup', Job::CREATED, array('trigger' => 'scheduled'));
@@ -143,7 +203,7 @@ final class ScheduledBackupRunnerTest extends TestCase
 
     private function runner(
         ScheduleRunnerJobRepository $jobs,
-        ScheduleRunnerStepRunner $step_runner,
+        BackupStepRunnerInterface $step_runner,
         ?ScheduleRunnerExecutionLock $lock = null
     ): ScheduledBackupRunner
     {
@@ -241,6 +301,18 @@ final class ScheduleRunnerStepRunner implements BackupStepRunnerInterface
         $payload['updated_at'] = gmdate('c');
 
         return new Job($job->id(), $job->type(), $this->next_state, $payload);
+    }
+}
+
+final class ScheduleRunnerFailingStepRunner implements BackupStepRunnerInterface
+{
+    public function runStep(Job $job): Job
+    {
+        $payload = $job->payload();
+        $payload['failed_state'] = $job->state();
+        $payload['error'] = 'temporary archive failure';
+
+        return new Job($job->id(), $job->type(), Job::FAILED, $payload);
     }
 }
 

@@ -149,6 +149,33 @@ final class BackupArchiveStepPackagerTest extends TestCase
         self::assertSame(2, $manifest['database_table_count']);
     }
 
+    public function testRecordsSourceFilesThatChangedAfterScanning(): void
+    {
+        $file = new ScannedFile($this->root . '/site/uploads/a.txt', 'uploads/a.txt', 1, false);
+        file_put_contents($this->root . '/site/uploads/a.txt', 'changed after scan');
+        $packager = new BackupArchiveStepPackager(
+            new ManifestBuilder('0.1.0', '1'),
+            10,
+            20.0,
+            new PackageWriterFactory(array(new DirectoryPackageWriter()))
+        );
+
+        $payload = $packager->packageStep(
+            'backup-123',
+            $this->root . '/working',
+            $this->root . '/working/database',
+            array($file),
+            $this->metadata(),
+            array()
+        );
+
+        self::assertTrue($payload['archive_complete']);
+        self::assertSame(1, $payload['archive_changed_file_count']);
+        self::assertSame(array('files/uploads/a.txt'), $payload['archive_changed_files']);
+        $manifest = json_decode((string) file_get_contents($this->root . '/working/backup-123/manifest.json'), true);
+        self::assertStringContainsString('1 source file(s) changed', $manifest['warnings'][0]);
+    }
+
     public function testPackagesTarGzPackageAcrossMultipleBoundedStepsWhenZipIsUnavailable(): void
     {
         if (!class_exists(PharData::class)) {

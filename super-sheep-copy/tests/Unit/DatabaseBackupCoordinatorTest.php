@@ -18,6 +18,14 @@ use SuperSheepCopy\Backup\Database\WpdbDatabaseExporter;
 
 final class DatabaseBackupCoordinatorTest extends TestCase
 {
+    public function testPrimaryKeyExportContinuesPastAnUnderestimatedRowCount(): void
+    {
+        $this->coordinator(new UnderestimatedRowCountClient(), null)->export($this->root, 'wp_', TableSelector::MODE_PREFIXED, 2);
+
+        self::assertFileExists($this->root . '/database/chunks/wp_posts.part002.sql');
+        $manifest = json_decode((string) file_get_contents($this->root . '/database/tables.json'), true);
+        self::assertSame(array('wp_posts.part001.sql', 'wp_posts.part002.sql'), $manifest['tables'][0]['chunks']);
+    }
     private string $root;
 
     protected function setUp(): void
@@ -211,6 +219,14 @@ class CoordinatorFakeClient implements WpdbClientInterface
             $sql = preg_replace('/%d/', (string) $arg, $sql, 1);
         }
         return $sql;
+    }
+}
+
+final class UnderestimatedRowCountClient extends CoordinatorFakeClient
+{
+    public function getRowCount(string $table): int
+    {
+        return 1;
     }
 }
 

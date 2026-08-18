@@ -19,6 +19,7 @@ use Throwable;
 final class ScheduledBackupRunner
 {
     private const MAX_STEPS_PER_TICK = 3;
+    private const MAX_STEP_RETRIES = 3;
 
     private JobRepositoryInterface $jobs;
     private ScheduleSettingsRepository $schedule_settings;
@@ -57,6 +58,11 @@ final class ScheduledBackupRunner
     {
         add_action(ScheduleEventScheduler::DUE_HOOK, array($this, 'handleDueEvent'));
         add_action(ScheduleEventScheduler::CONTINUE_HOOK, array($this, 'handleContinuationEvent'));
+
+        // A normal WordPress request repairs a lost continuation event.
+        if ($this->scheduledRunningBackup() !== null) {
+            $this->events->scheduleContinuation();
+        }
     }
 
     public function handleDueEvent(?int $scheduled_for = null): void
@@ -70,6 +76,9 @@ final class ScheduledBackupRunner
         if ($this->runningBackup() !== null) {
             $this->schedule_settings->save($settings->withLastRun('skipped', 'A backup is already running.', $run_at));
             $this->events->scheduleDueEvent($settings, $scheduled_for ?? time());
+            if ($this->scheduledRunningBackup() !== null) {
+                $this->events->scheduleContinuation();
+            }
             return;
         }
 
@@ -99,6 +108,9 @@ final class ScheduledBackupRunner
                 $job = $this->jobs->find($job_id);
                 if ($job !== null && $this->isScheduledRunningJob($job)) {
                     $job = $this->step_runner->runStep($job);
+                    if ($job->state() !== Job::FAILED) {
+                        $job = $this->clearRetryState($job);
+                    }
                     $this->jobs->save($job);
                 }
             } finally {
@@ -115,6 +127,13 @@ final class ScheduledBackupRunner
             }
 
             if ($job->state() === Job::FAILED) {
+                $retry_job = $this->retryFailedStep($job);
+                if ($retry_job !== null) {
+                    $this->jobs->save($retry_job);
+                    $this->recordLastRun('queued', (string) $retry_job->payload()['message']);
+                    $this->events->scheduleContinuation();
+                    return;
+                }
                 $this->recordLastRun('failed', 'Scheduled backup failed.');
                 return;
             }
@@ -125,6 +144,49 @@ final class ScheduledBackupRunner
         }
 
         $this->events->scheduleContinuation();
+    }
+
+    private function retryFailedStep(Job $job): ?Job
+    {
+        $payload = $job->payload();
+        $failed_state = isset($payload['failed_state']) && is_scalar($payload['failed_state'])
+            ? (string) $payload['failed_state']
+            : '';
+        if ($failed_state === '' || !$this->isRunningState($failed_state)) {
+            return null;
+        }
+
+        $retry_state = isset($payload['scheduled_retry_state']) && is_scalar($payload['scheduled_retry_state'])
+            ? (string) $payload['scheduled_retry_state']
+            : '';
+        $retry_count = $retry_state === $failed_state && isset($payload['scheduled_retry_count'])
+            ? (int) $payload['scheduled_retry_count']
+            : 0;
+        if ($retry_count >= self::MAX_STEP_RETRIES) {
+            return null;
+        }
+
+        $retry_count++;
+        $payload['last_error'] = isset($payload['error']) && is_scalar($payload['error']) ? (string) $payload['error'] : '';
+        $payload['scheduled_retry_state'] = $failed_state;
+        $payload['scheduled_retry_count'] = $retry_count;
+        $payload['message'] = 'Retrying scheduled backup step ' . $retry_count . ' of ' . self::MAX_STEP_RETRIES . '.';
+        $payload['updated_at'] = gmdate('c');
+        unset($payload['error']);
+
+        return new Job($job->id(), $job->type(), $failed_state, $payload);
+    }
+
+    private function clearRetryState(Job $job): Job
+    {
+        $payload = $job->payload();
+        if (!isset($payload['scheduled_retry_state']) && !isset($payload['scheduled_retry_count'])) {
+            return $job;
+        }
+
+        unset($payload['scheduled_retry_state'], $payload['scheduled_retry_count'], $payload['last_error']);
+
+        return new Job($job->id(), $job->type(), $job->state(), $payload);
     }
 
     private function queueScheduledBackup(ScheduleSettings $settings, int $scheduled_for): void

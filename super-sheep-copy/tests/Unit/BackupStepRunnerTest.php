@@ -78,6 +78,25 @@ final class BackupStepRunnerTest extends TestCase
         self::assertSame('database', $job->payload()['backup_bottleneck']);
     }
 
+    public function testPrimaryKeyExportContinuesPastAnUnderestimatedRowCount(): void
+    {
+        $jobs = new BackupStepRunnerJobRepository();
+        $runner = $this->runnerWithPackager($jobs, new BackupStepRunnerPackager(), 100, new BackupStepRunnerUnderestimatedRowCountClient());
+        $job = new Job('backup-123', 'backup', Job::CREATED, $this->payload());
+
+        $job = $runner->runStep($job);
+        $job = $runner->runStep($job);
+        self::assertSame(Job::EXPORTING_DATABASE, $job->state());
+        $job = $runner->runStep($job);
+        self::assertSame(Job::EXPORTING_DATABASE, $job->state());
+        $job = $runner->runStep($job);
+
+        self::assertSame(Job::SCANNING_FILES, $job->state());
+        self::assertFileExists($this->root . '/work/backup-123/database/chunks/wp_posts.part002.sql');
+        $manifest = json_decode((string) file_get_contents($this->root . '/work/backup-123/database/tables.json'), true);
+        self::assertSame(array('wp_posts.part001.sql', 'wp_posts.part002.sql'), $manifest['tables'][0]['chunks']);
+    }
+
     public function testDatabaseExportKeepsConfiguredChunkSizeForOffsetTables(): void
     {
         $jobs = new BackupStepRunnerJobRepository();
@@ -244,6 +263,21 @@ final class BackupStepRunnerTest extends TestCase
         self::assertSame(Job::PACKAGING_ARCHIVE, $job->payload()['failed_state']);
     }
 
+    public function testCompletedBackupSurfacesChangedSourceWarning(): void
+    {
+        $jobs = new BackupStepRunnerJobRepository();
+        $payload = $this->payload();
+        $payload['database_directory'] = $this->root . '/work/backup-123/database';
+        $payload['archive_changed_file_count'] = 2;
+        mkdir($this->root . '/work/backup-123', 0777, true);
+        $runner = $this->runnerWithPackager($jobs, new BackupStepRunnerPackager());
+
+        $job = $runner->runStep(new Job('backup-123', 'backup', Job::PACKAGING_ARCHIVE, $payload));
+
+        self::assertSame(Job::COMPLETED, $job->state());
+        self::assertSame('Backup completed with warnings: 2 source file(s) changed during the backup.', $job->payload()['message']);
+    }
+
     public function testPackagingArchiveStateCanContinueAcrossMultipleSteps(): void
     {
         if (!class_exists(\ZipArchive::class)) {
@@ -401,7 +435,7 @@ final class BackupStepRunnerJobRepository implements JobRepositoryInterface
     }
 }
 
-final class BackupStepRunnerClient implements WpdbClientInterface
+class BackupStepRunnerClient implements WpdbClientInterface
 {
     public function getTables(): array
     {
@@ -500,6 +534,14 @@ final class BackupStepRunnerNoPrimaryKeyClient implements WpdbClientInterface
         }
 
         return $sql;
+    }
+}
+
+final class BackupStepRunnerUnderestimatedRowCountClient extends BackupStepRunnerClient
+{
+    public function getRowCount(string $table): int
+    {
+        return 1;
     }
 }
 
