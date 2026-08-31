@@ -14,6 +14,8 @@ use SuperSheepCopy\Jobs\Job;
 use SuperSheepCopy\Jobs\JobRepositoryInterface;
 use SuperSheepCopy\Jobs\RefreshableJobRepositoryInterface;
 use SuperSheepCopy\Settings\BackupSettingsRepository;
+use SuperSheepCopy\Support\LoggerInterface;
+use SuperSheepCopy\Support\NullLogger;
 use Throwable;
 
 final class ScheduledBackupRunner
@@ -30,6 +32,7 @@ final class ScheduledBackupRunner
     private string $backup_directory;
     private ScheduleEventScheduler $events;
     private BackupJobExecutionLockInterface $lock;
+    private LoggerInterface $logger;
 
     public function __construct(
         JobRepositoryInterface $jobs,
@@ -40,7 +43,8 @@ final class ScheduledBackupRunner
         string $site_root,
         string $backup_directory,
         ?ScheduleEventScheduler $events = null,
-        ?BackupJobExecutionLockInterface $lock = null
+        ?BackupJobExecutionLockInterface $lock = null,
+        ?LoggerInterface $logger = null
     ) {
         $this->jobs = $jobs;
         $this->schedule_settings = $schedule_settings;
@@ -52,6 +56,7 @@ final class ScheduledBackupRunner
         $this->events = $events ?: new ScheduleEventScheduler();
         $wpdb = isset($GLOBALS['wpdb']) ? $GLOBALS['wpdb'] : new \stdClass();
         $this->lock = $lock ?? new BackupJobExecutionLock(new WordPressOptionBackupJobLockStore($wpdb));
+        $this->logger = $logger ?? new NullLogger();
     }
 
     public function register(): void
@@ -82,8 +87,15 @@ final class ScheduledBackupRunner
             return;
         }
 
-        $this->queueScheduledBackup($settings, $scheduled_for ?? time());
-        $this->schedule_settings->save($settings->withLastRun('queued', 'Scheduled backup queued.', $run_at));
+        try {
+            $this->queueScheduledBackup($settings, $scheduled_for ?? time());
+            $this->schedule_settings->save($settings->withLastRun('queued', 'Scheduled backup queued.', $run_at));
+        } catch (Throwable $throwable) {
+            $this->logger->error('Scheduled backup creation failed.', $this->exceptionContext($throwable));
+            $this->schedule_settings->save($settings->withLastRun('failed', 'Scheduled backup creation failed: ' . $this->displayError($throwable), $run_at));
+            $this->events->scheduleDueEvent($settings, $scheduled_for ?? time());
+            return;
+        }
         $this->events->scheduleDueEvent($settings, $scheduled_for ?? time());
         $this->events->scheduleContinuation();
     }
@@ -97,7 +109,13 @@ final class ScheduledBackupRunner
 
         for ($i = 0; $i < self::MAX_STEPS_PER_TICK; $i++) {
             $job_id = $job->id();
-            $owner_token = $this->lock->acquire($job_id);
+            try {
+                $owner_token = $this->lock->acquire($job_id);
+            } catch (Throwable $throwable) {
+                $this->logger->error('Scheduled backup lock acquisition failed.', $this->exceptionContext($throwable, array('job_id' => $job_id)));
+                $this->events->scheduleContinuation();
+                return;
+            }
             if ($owner_token === null) {
                 $this->events->scheduleContinuation();
                 return;
@@ -127,6 +145,12 @@ final class ScheduledBackupRunner
             }
 
             if ($job->state() === Job::FAILED) {
+                $payload = $job->payload();
+                $this->logger->error('Scheduled backup step failed.', array(
+                    'job_id' => $job->id(),
+                    'state' => isset($payload['failed_state']) && is_scalar($payload['failed_state']) ? (string) $payload['failed_state'] : '',
+                    'error' => isset($payload['error']) && is_scalar($payload['error']) ? (string) $payload['error'] : (isset($payload['message']) ? (string) $payload['message'] : ''),
+                ));
                 $retry_job = $this->retryFailedStep($job);
                 if ($retry_job !== null) {
                     $this->jobs->save($retry_job);
@@ -269,7 +293,7 @@ final class ScheduledBackupRunner
         try {
             $this->lock->release($job_id, $owner_token);
         } catch (Throwable $throwable) {
-            // The expiring lease permits recovery; preserve the backup result.
+            $this->logger->warning('Scheduled backup lock release failed.', $this->exceptionContext($throwable, array('job_id' => $job_id)));
         }
     }
 
@@ -278,5 +302,24 @@ final class ScheduledBackupRunner
         if ($this->jobs instanceof RefreshableJobRepositoryInterface) {
             $this->jobs->refresh();
         }
+    }
+
+    private function displayError(Throwable $throwable): string
+    {
+        $message = trim($throwable->getMessage());
+
+        return substr($message !== '' ? $message : 'An unexpected error occurred.', 0, 500);
+    }
+
+    /**
+     * @param array<string,mixed> $context
+     * @return array<string,mixed>
+     */
+    private function exceptionContext(Throwable $throwable, array $context = array()): array
+    {
+        return array_merge($context, array(
+            'exception' => get_class($throwable),
+            'error' => $throwable->getMessage(),
+        ));
     }
 }

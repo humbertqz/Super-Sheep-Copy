@@ -4,6 +4,7 @@
  * @var array<string, array{label:string,value:string,status:string}> $environment
  * @var \SuperSheepCopy\Jobs\Job|null $current_job
  * @var string[] $backup_settings_summary
+ * @var string $backup_error
  * @var list<\SuperSheepCopy\Jobs\Job> $jobs
  * @var array<string, string> $job_created_date_labels
  * @var array<string, mixed> $manifest_preview
@@ -32,7 +33,10 @@ foreach ($jobs as $job) {
     </div>
 <?php elseif ($status === 'backup_failed') : ?>
     <div class="super-sheep-copy-admin-notice super-sheep-copy-admin-notice-error">
-        <p><?php echo esc_html__('Backup creation failed. Check the latest job state and server logs.', 'super-sheep-copy'); ?></p>
+        <p><?php echo esc_html__('Backup creation failed.', 'super-sheep-copy'); ?></p>
+        <?php if ($backup_error !== '') : ?>
+            <p><?php echo esc_html(sprintf(__('Reason: %s', 'super-sheep-copy'), $backup_error)); ?></p>
+        <?php endif; ?>
     </div>
 <?php elseif ($status === 'job_deleted') : ?>
     <div class="super-sheep-copy-admin-notice super-sheep-copy-admin-notice-success">
@@ -41,6 +45,16 @@ foreach ($jobs as $job) {
 <?php elseif ($status === 'download_failed') : ?>
     <div class="super-sheep-copy-admin-notice super-sheep-copy-admin-notice-error">
         <p><?php echo esc_html__('Backup download is not available. Folder package backups stay on the server when ZIP is unavailable.', 'super-sheep-copy'); ?></p>
+        <?php if ($backup_error !== '') : ?>
+            <p><?php echo esc_html(sprintf(__('Reason: %s', 'super-sheep-copy'), $backup_error)); ?></p>
+        <?php endif; ?>
+    </div>
+<?php elseif ($status === 'job_delete_failed') : ?>
+    <div class="super-sheep-copy-admin-notice super-sheep-copy-admin-notice-error">
+        <p><?php echo esc_html__('Backup deletion failed.', 'super-sheep-copy'); ?></p>
+        <?php if ($backup_error !== '') : ?>
+            <p><?php echo esc_html(sprintf(__('Reason: %s', 'super-sheep-copy'), $backup_error)); ?></p>
+        <?php endif; ?>
     </div>
 <?php endif; ?>
 <div class="wrap super-sheep-copy">

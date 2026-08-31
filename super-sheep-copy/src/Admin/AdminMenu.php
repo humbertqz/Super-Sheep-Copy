@@ -155,7 +155,8 @@ final class AdminMenu
             $this->backup_factory,
             $this->metadata_collector,
             null,
-            new BackupSettingsRepository()
+            new BackupSettingsRepository(),
+            $this->logger
         );
     }
 
@@ -196,7 +197,8 @@ final class AdminMenu
                 new FileScanner(),
                 $packager
             ),
-            $this->backup_lock
+            $this->backup_lock,
+            $this->logger
         );
     }
 }

@@ -30,8 +30,8 @@ use SuperSheepCopy\Security\Nonce;
 use SuperSheepCopy\Settings\BackupSettingsRepository;
 use SuperSheepCopy\Shared\Archive\ArchiveValidator;
 use SuperSheepCopy\Support\EnvironmentChecker;
+use SuperSheepCopy\Support\ErrorLogLogger;
 use SuperSheepCopy\Support\Filesystem;
-use SuperSheepCopy\Support\NullLogger;
 
 final class Plugin
 {
@@ -85,19 +85,22 @@ final class Plugin
 
         $environment_checker = new EnvironmentChecker(self::backupDirectory());
         $jobs = new OptionJobRepository();
+        $settings = new BackupSettingsRepository();
+        $logger = new ErrorLogLogger($settings->get()->debugLogging());
         $metadata_collector = new BackupMetadataCollector($environment_checker);
         $backup_lock = new BackupJobExecutionLock(new WordPressOptionBackupJobLockStore($wpdb));
 
         $scheduled_runner = new ScheduledBackupRunner(
             $jobs,
             new ScheduleSettingsRepository(),
-            new BackupSettingsRepository(),
+            $settings,
             $metadata_collector,
             $this->backupStepRunner($jobs, $wpdb),
             defined('ABSPATH') ? ABSPATH : '',
             self::backupDirectory(),
             null,
-            $backup_lock
+            $backup_lock,
+            $logger
         );
         $scheduled_runner->register();
 
@@ -107,7 +110,7 @@ final class Plugin
                 new Nonce(),
                 $environment_checker,
                 $jobs,
-                new NullLogger(),
+                $logger,
                 new BackupManagerFactory($jobs, $wpdb),
                 $metadata_collector,
                 new RestorePreparationManager(

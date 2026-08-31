@@ -52,6 +52,10 @@ final class BackupDownloadHandler
 
         $payload = $job->payload();
         $archive_path = isset($payload['archive_path']) && is_scalar($payload['archive_path']) ? (string) $payload['archive_path'] : '';
+        $package_format = isset($payload['package_format']) && is_scalar($payload['package_format']) ? (string) $payload['package_format'] : '';
+        if ($package_format === 'directory' || is_dir($archive_path)) {
+            throw new RuntimeException('Folder package backups stay on the server and cannot be downloaded.');
+        }
         if ($archive_path === '' || !is_file($archive_path)) {
             throw new RuntimeException('Backup archive file was not found.');
         }

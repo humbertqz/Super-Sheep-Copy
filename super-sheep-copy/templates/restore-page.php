@@ -27,6 +27,9 @@ defined('ABSPATH') || exit;
 <?php elseif ($status === 'backup_delete_failed') : ?>
     <div class="super-sheep-copy-admin-notice super-sheep-copy-admin-notice-error">
         <p><?php echo esc_html__('Backup package deletion failed.', 'super-sheep-copy'); ?></p>
+        <?php if ($restore_error !== '') : ?>
+            <p><?php echo esc_html(sprintf(__('Reason: %s', 'super-sheep-copy'), $restore_error)); ?></p>
+        <?php endif; ?>
     </div>
 <?php elseif ($status === 'restore_failed') : ?>
     <div class="super-sheep-copy-admin-notice super-sheep-copy-admin-notice-error">
@@ -43,6 +46,9 @@ defined('ABSPATH') || exit;
 <?php elseif ($status === 'installer_failed') : ?>
     <div class="super-sheep-copy-admin-notice super-sheep-copy-admin-notice-error">
         <p><?php echo esc_html__('Installer preparation failed. Check server permissions and try again.', 'super-sheep-copy'); ?></p>
+        <?php if ($restore_error !== '') : ?>
+            <p><?php echo esc_html(sprintf(__('Reason: %s', 'super-sheep-copy'), $restore_error)); ?></p>
+        <?php endif; ?>
     </div>
 <?php endif; ?>
 <div class="wrap super-sheep-copy">

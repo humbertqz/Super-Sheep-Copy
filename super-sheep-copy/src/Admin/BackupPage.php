@@ -18,6 +18,8 @@ use SuperSheepCopy\Security\Capability;
 use SuperSheepCopy\Security\Nonce;
 use SuperSheepCopy\Settings\BackupSettingsRepository;
 use SuperSheepCopy\Support\EnvironmentCheckerInterface;
+use SuperSheepCopy\Support\LoggerInterface;
+use SuperSheepCopy\Support\NullLogger;
 use Throwable;
 
 final class BackupPage
@@ -28,6 +30,7 @@ final class BackupPage
     private const ACTION_DOWNLOAD_BACKUP = 'download_backup';
     private const STATUS_FIELD = 'super_sheep_copy_status';
     private const JOB_ID_FIELD = 'job_id';
+    private const ERROR_FIELD = 'super_sheep_copy_error';
 
     private Capability $capability;
     private Nonce $nonce;
@@ -37,6 +40,7 @@ final class BackupPage
     private ?BackupMetadataCollectorInterface $metadata_collector;
     private ?BackupJobFileCleaner $job_file_cleaner;
     private BackupSettingsRepository $settings;
+    private LoggerInterface $logger;
 
     public function __construct(
         Capability $capability,
@@ -46,7 +50,8 @@ final class BackupPage
         ?BackupManagerFactoryInterface $backup_factory = null,
         ?BackupMetadataCollectorInterface $metadata_collector = null,
         ?BackupJobFileCleaner $job_file_cleaner = null,
-        ?BackupSettingsRepository $settings = null
+        ?BackupSettingsRepository $settings = null,
+        ?LoggerInterface $logger = null
     ) {
         $this->capability = $capability;
         $this->nonce = $nonce;
@@ -56,6 +61,7 @@ final class BackupPage
         $this->metadata_collector = $metadata_collector;
         $this->job_file_cleaner = $job_file_cleaner;
         $this->settings = $settings !== null ? $settings : new BackupSettingsRepository();
+        $this->logger = $logger !== null ? $logger : new NullLogger();
     }
 
     public function render(): void
@@ -80,6 +86,7 @@ final class BackupPage
             'is_multisite' => function_exists('is_multisite') ? is_multisite() : false,
         );
         $status = $this->status();
+        $backup_error = $this->requestError();
         $nonce_field = $this->nonce->field();
         include SUPER_SHEEP_COPY_DIR . 'templates/backup-page.php';
     }
@@ -137,7 +144,8 @@ final class BackupPage
             )));
             $this->redirect('backup_queued', array(self::JOB_ID_FIELD => $job_id));
         } catch (Throwable $throwable) {
-            $this->redirect('backup_failed');
+            $this->logger->error('Backup creation failed.', $this->exceptionContext($throwable));
+            $this->redirect('backup_failed', array(self::ERROR_FIELD => $this->displayError($throwable)));
         }
 
         return true;
@@ -159,17 +167,22 @@ final class BackupPage
         $this->capability->assertManageBackups();
         $this->nonce->verifyRequest();
 
-        $job_id = isset($_POST[self::JOB_ID_FIELD]) ? sanitize_text_field(wp_unslash($_POST[self::JOB_ID_FIELD])) : '';
-        if ($job_id !== '') {
-            $job = $this->jobs->find($job_id);
-            if ($job !== null) {
-                $this->jobFileCleaner()->clean($job);
+        try {
+            $job_id = isset($_POST[self::JOB_ID_FIELD]) ? sanitize_text_field(wp_unslash($_POST[self::JOB_ID_FIELD])) : '';
+            if ($job_id !== '') {
+                $job = $this->jobs->find($job_id);
+                if ($job !== null) {
+                    $this->jobFileCleaner()->clean($job);
+                }
+
+                $this->jobs->delete($job_id);
             }
 
-            $this->jobs->delete($job_id);
+            $this->redirect('job_deleted');
+        } catch (Throwable $throwable) {
+            $this->logger->error('Backup deletion failed.', $this->exceptionContext($throwable, array('job_id' => $job_id ?? '')));
+            $this->redirect('job_delete_failed', array(self::ERROR_FIELD => $this->displayError($throwable)));
         }
-
-        $this->redirect('job_deleted');
 
         return true;
     }
@@ -190,7 +203,9 @@ final class BackupPage
         try {
             $this->downloadHandler()->handleRequest();
         } catch (Throwable $throwable) {
-            $this->redirect('download_failed');
+            $job_id = isset($_POST[self::JOB_ID_FIELD]) ? sanitize_text_field(wp_unslash($_POST[self::JOB_ID_FIELD])) : '';
+            $this->logger->error('Backup download failed.', $this->exceptionContext($throwable, array('job_id' => $job_id)));
+            $this->redirect('download_failed', array(self::ERROR_FIELD => $this->displayError($throwable)));
         }
 
         return true;
@@ -268,6 +283,11 @@ final class BackupPage
             $payload['failed_state'] = $job->state();
             $payload['updated_at'] = gmdate('c');
             $this->jobs->save(new Job($job->id(), $job->type(), Job::FAILED, $payload));
+            $this->logger->error('Backup job stopped.', array(
+                'job_id' => $job->id(),
+                'state' => $job->state(),
+                'error' => $payload['error'],
+            ));
         }
     }
 
@@ -414,6 +434,32 @@ final class BackupPage
     private function status(): string
     {
         return isset($_GET[self::STATUS_FIELD]) ? sanitize_text_field(wp_unslash($_GET[self::STATUS_FIELD])) : '';
+    }
+
+    private function requestError(): string
+    {
+        $error = isset($_GET[self::ERROR_FIELD]) ? sanitize_text_field(wp_unslash($_GET[self::ERROR_FIELD])) : '';
+
+        return substr($error, 0, 500);
+    }
+
+    private function displayError(Throwable $throwable): string
+    {
+        $message = trim($throwable->getMessage());
+
+        return substr($message !== '' ? $message : 'An unexpected error occurred.', 0, 500);
+    }
+
+    /**
+     * @param array<string,mixed> $context
+     * @return array<string,mixed>
+     */
+    private function exceptionContext(Throwable $throwable, array $context = array()): array
+    {
+        return array_merge($context, array(
+            'exception' => get_class($throwable),
+            'error' => $throwable->getMessage(),
+        ));
     }
 
     private function currentJob(): ?Job

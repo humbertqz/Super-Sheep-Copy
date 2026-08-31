@@ -1,4 +1,5 @@
 <?php
+// phpcs:disable WordPress.PHP.DevelopmentFunctions.error_log_error_log -- The standalone installer cannot use WordPress logging APIs.
 
 declare(strict_types=1);
 
@@ -58,6 +59,21 @@ final class Bootstrap
 {
     public static function run(): void
     {
+        try {
+            self::render();
+        } catch (\Throwable $throwable) {
+            self::logError('Restore installer failed.', array(
+                'exception' => get_class($throwable),
+                'error' => self::safeLogReason($throwable->getMessage()),
+            ));
+            self::sendHtmlHeader();
+            echo '<div class="status error"><strong>Restore failed.</strong><br>Reason: '
+                . esc_html(self::displayError($throwable->getMessage())) . '</div></body></html>';
+        }
+    }
+
+    private static function render(): void
+    {
         $engine_dir = self::engineDirectory();
         $config = self::loadConfig($engine_dir);
         $security = new Security();
@@ -116,6 +132,7 @@ final class Bootstrap
         }
 
         $rollback_message = '';
+        $rollback_failed = false;
         if (self::requestMethod() === 'POST' && isset($_POST['prepare_rollback'])) {
             if ($has_blocking_errors) {
                 $rollback_message = 'Rollback preparation blocked by preflight errors.';
@@ -136,11 +153,14 @@ final class Bootstrap
                     $rollback_message = 'Rollback prepared.';
                 } else {
                     $rollback_message = 'Rollback preparation failed.';
+                    $rollback_failed = true;
+                    self::logError($rollback_message, array('reason' => self::resultReason($rollback_result)));
                 }
             }
         }
 
         $database_import_message = '';
+        $database_import_failed = false;
         if (self::requestMethod() === 'POST' && isset($_POST['stage_database_import'])) {
             $manager = new DatabaseImportPreparationManager(
                 $wp_config,
@@ -159,10 +179,13 @@ final class Bootstrap
                 $database_import_message = 'Database import still running. Continue to process the next batch.';
             } else {
                 $database_import_message = isset($import_result['warnings'][0]) ? $import_result['warnings'][0] : 'Database import staging failed.';
+                $database_import_failed = true;
+                self::logError('Database import staging failed.', array('reason' => self::safeLogReason($database_import_message)));
             }
         }
 
         $table_swap_message = '';
+        $table_swap_failed = false;
         if (self::requestMethod() === 'POST' && isset($_POST['swap_database_tables'])) {
             $manager = new DatabaseTableSwapManager(
                 $wp_config,
@@ -177,10 +200,13 @@ final class Bootstrap
                 $table_swap_message = 'Database tables swapped.';
             } else {
                 $table_swap_message = isset($swap_result['warnings'][0]) ? $swap_result['warnings'][0] : 'Database table swap failed.';
+                $table_swap_failed = true;
+                self::logError('Database table swap failed.', array('reason' => self::safeLogReason($table_swap_message)));
             }
         }
 
         $url_replacement_message = '';
+        $url_replacement_failed = false;
         if (self::requestMethod() === 'POST' && isset($_POST['replace_database_urls'])) {
             $manager = new DatabaseUrlReplacementManager(
                 $wp_config,
@@ -194,10 +220,13 @@ final class Bootstrap
                 $url_replacement_message = 'Database URLs replaced.';
             } else {
                 $url_replacement_message = isset($replacement_result['warnings'][0]) ? $replacement_result['warnings'][0] : 'Database URL replacement failed.';
+                $url_replacement_failed = true;
+                self::logError('Database URL replacement failed.', array('reason' => self::safeLogReason($url_replacement_message)));
             }
         }
 
         $file_restore_message = '';
+        $file_restore_failed = false;
         if (self::requestMethod() === 'POST' && isset($_POST['restore_files'])) {
             $manager = new FileRestoreManager($archive_validator);
             $file_result = $manager->restore($engine_dir, $config);
@@ -211,6 +240,8 @@ final class Bootstrap
                 return;
             } else {
                 $file_restore_message = isset($file_result['warnings'][0]) ? $file_result['warnings'][0] : 'File restore failed.';
+                $file_restore_failed = true;
+                self::logError('File restore failed.', array('reason' => self::safeLogReason($file_restore_message)));
             }
         }
 
@@ -220,6 +251,9 @@ final class Bootstrap
             $validation = $archive_validator->validatePackage($archive_path);
         }
         if (!$validation->isValid()) {
+            self::logError('Prepared restore archive validation failed.', array(
+                'reason' => self::safeLogReason(implode(' ', $validation->errors())),
+            ));
             echo '<div class="status error">Prepared archive could not be validated. Restore execution is unavailable.</div>';
             echo '</body></html>';
             return;
@@ -282,7 +316,7 @@ final class Bootstrap
         echo self::openInstallerStep(3, 'Prepare rollback', $step_states['rollback']);
         echo '<h2>Rollback Preparation</h2>';
         if ($rollback_message !== '') {
-            echo '<div class="status ' . (!empty($config['rollback_prepared']) ? 'ok' : 'warning') . '">' . esc_html($rollback_message) . '</div>';
+            echo '<div class="status ' . ($rollback_failed ? 'error' : (!empty($config['rollback_prepared']) ? 'ok' : 'warning')) . '">' . esc_html($rollback_message) . '</div>';
         }
         if (empty($config['restore_confirmed'])) {
             echo '<div class="status warning">Rollback requires restore confirmation.</div>';
@@ -313,7 +347,7 @@ final class Bootstrap
         echo self::openInstallerStep(4, 'Import database', $step_states['database_import']);
         echo '<h2>Database Import</h2>';
         if ($database_import_message !== '') {
-            echo '<div class="status ' . (!empty($config['database_import_staged']) ? 'ok' : 'warning') . '">' . esc_html($database_import_message) . '</div>';
+            echo '<div class="status ' . ($database_import_failed ? 'error' : (!empty($config['database_import_staged']) ? 'ok' : 'warning')) . '">' . esc_html($database_import_message) . '</div>';
         }
         if (empty($config['restore_confirmed'])) {
             echo '<div class="status warning">Database import requires restore confirmation.</div>';
@@ -346,7 +380,7 @@ final class Bootstrap
         echo self::openInstallerStep(5, 'Swap database tables', $step_states['database_swap']);
         echo '<h2>Database Table Swap</h2>';
         if ($table_swap_message !== '') {
-            echo '<div class="status ' . (!empty($config['database_tables_swapped']) ? 'ok' : 'warning') . '">' . esc_html($table_swap_message) . '</div>';
+            echo '<div class="status ' . ($table_swap_failed ? 'error' : 'ok') . '">' . esc_html($table_swap_message) . '</div>';
         }
         if (empty($config['restore_confirmed'])) {
             echo '<div class="status warning">Database table swap requires restore confirmation.</div>';
@@ -383,7 +417,7 @@ final class Bootstrap
         echo self::openInstallerStep(6, 'Replace URLs', $step_states['url_replacement']);
         echo '<h2>Database URL Replacement</h2>';
         if ($url_replacement_message !== '') {
-            echo '<div class="status ' . (!empty($config['database_url_replacement_completed']) ? 'ok' : 'warning') . '">' . esc_html($url_replacement_message) . '</div>';
+            echo '<div class="status ' . ($url_replacement_failed ? 'error' : 'ok') . '">' . esc_html($url_replacement_message) . '</div>';
         }
         if (empty($config['restore_confirmed'])) {
             echo '<div class="status warning">Database URL replacement requires restore confirmation.</div>';
@@ -417,7 +451,7 @@ final class Bootstrap
         echo self::openInstallerStep(7, 'Restore files', $step_states['file_restore']);
         echo '<h2>File Restore</h2>';
         if ($file_restore_message !== '') {
-            echo '<div class="status ' . (!empty($config['file_restore_completed']) ? 'ok' : 'warning') . '">' . esc_html($file_restore_message) . '</div>';
+            echo '<div class="status ' . ($file_restore_failed ? 'error' : 'ok') . '">' . esc_html($file_restore_message) . '</div>';
         }
         if (empty($config['restore_confirmed'])) {
             echo '<div class="status warning">File restore requires restore confirmation.</div>';
@@ -556,6 +590,42 @@ final class Bootstrap
         if (!headers_sent()) {
             header('Content-Type: text/html; charset=utf-8');
         }
+    }
+
+    /**
+     * @param array<string,mixed> $result
+     */
+    private static function resultReason(array $result): string
+    {
+        $warnings = isset($result['warnings']) && is_array($result['warnings']) ? $result['warnings'] : array();
+
+        return isset($warnings[0]) ? self::safeLogReason((string) $warnings[0]) : '';
+    }
+
+    private static function displayError(string $message): string
+    {
+        $message = trim($message);
+
+        return substr($message !== '' ? $message : 'An unexpected error occurred.', 0, 500);
+    }
+
+    private static function safeLogReason(string $reason): string
+    {
+        $statement_position = strpos($reason, ' Statement:');
+        if ($statement_position !== false) {
+            $reason = substr($reason, 0, $statement_position);
+        }
+
+        return substr(trim($reason), 0, 1000);
+    }
+
+    /**
+     * @param array<string,mixed> $context
+     */
+    private static function logError(string $message, array $context = array()): void
+    {
+        $encoded = $context !== array() ? json_encode($context) : '';
+        error_log('[Super Sheep Copy] ERROR: ' . $message . (is_string($encoded) && $encoded !== '' ? ' ' . $encoded : ''));
     }
 }
 

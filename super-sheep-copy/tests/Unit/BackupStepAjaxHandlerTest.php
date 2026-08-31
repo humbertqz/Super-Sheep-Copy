@@ -83,7 +83,7 @@ final class BackupStepAjaxHandlerTest extends TestCase
 
         self::assertSame(false, $GLOBALS['ssc_test_json_response']['success']);
         self::assertSame(404, $GLOBALS['ssc_test_json_response']['status_code']);
-        self::assertSame(array('job_id' => 'missing-job'), $GLOBALS['ssc_test_json_response']['data']);
+        self::assertSame(array('job_id' => 'missing-job', 'message' => 'Backup job was not found.'), $GLOBALS['ssc_test_json_response']['data']);
     }
 
     public function testFoundJobSendsQueuedJsonSuccessPayload(): void
@@ -150,7 +150,8 @@ final class BackupStepAjaxHandlerTest extends TestCase
             new Job('backup-123', 'backup', Job::PACKAGING_ARCHIVE, array('message' => 'Packaging archive.')),
         ));
         $lock = new BackupStepAjaxLock();
-        $handler = new BackupStepAjaxHandler(new Capability(), new Nonce(), $jobs, new BackupStepAjaxThrowingRunner(), $lock);
+        $logger = new BackupStepAjaxLogger();
+        $handler = new BackupStepAjaxHandler(new Capability(), new Nonce(), $jobs, new BackupStepAjaxThrowingRunner(), $lock, $logger);
 
         try {
             $handler->handle();
@@ -163,10 +164,36 @@ final class BackupStepAjaxHandlerTest extends TestCase
         self::assertSame('failed', $GLOBALS['ssc_test_json_response']['data']['status']);
         self::assertSame('Backup failed: archive close timeout', $GLOBALS['ssc_test_json_response']['data']['message']);
         self::assertSame(Job::PACKAGING_ARCHIVE, $jobs->find('backup-123')->payload()['failed_state']);
+        self::assertSame('Backup step failed.', $logger->errors[0]['message']);
+        self::assertSame('archive close timeout', $logger->errors[0]['context']['error']);
         self::assertSame(array(
             'acquire:backup-123',
             'release:backup-123:ajax-owner',
         ), $lock->events);
+    }
+
+    public function testFailedStepResultIsLogged(): void
+    {
+        $_REQUEST[Nonce::FIELD] = 'test-nonce';
+        $_REQUEST['job_id'] = 'backup-123';
+        $jobs = new BackupStepAjaxJobRepository(array(
+            new Job('backup-123', 'backup', Job::VALIDATING_BACKUP, array()),
+        ));
+        $runner = new BackupStepAjaxRunner(new Job('backup-123', 'backup', Job::FAILED, array(
+            'failed_state' => Job::VALIDATING_BACKUP,
+            'message' => 'Backup archive validation failed.',
+        )));
+        $logger = new BackupStepAjaxLogger();
+        $handler = new BackupStepAjaxHandler(new Capability(), new Nonce(), $jobs, $runner, new BackupStepAjaxLock(), $logger);
+
+        try {
+            $handler->handle();
+        } catch (RuntimeException $exception) {
+            self::assertSame('wp_send_json_success', $exception->getMessage());
+        }
+
+        self::assertSame('Backup step failed.', $logger->errors[0]['message']);
+        self::assertSame('Backup archive validation failed.', $logger->errors[0]['context']['error']);
     }
 
     public function testForeignRunningBackupJobFailsBeforeRunnerExecutes(): void
@@ -406,6 +433,9 @@ final class BackupStepAjaxEnvironmentChecker implements EnvironmentCheckerInterf
 
 final class BackupStepAjaxLogger implements LoggerInterface
 {
+    /** @var list<array{message:string,context:array<string,mixed>}> */
+    public array $errors = array();
+
     public function info(string $message, array $context = array()): void
     {
     }
@@ -416,6 +446,7 @@ final class BackupStepAjaxLogger implements LoggerInterface
 
     public function error(string $message, array $context = array()): void
     {
+        $this->errors[] = compact('message', 'context');
     }
 }
 

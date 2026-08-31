@@ -97,7 +97,7 @@ final class RestorePage
             $this->redirectToState('restore_prepared', array(self::JOB_ID_FIELD => $result->jobId()));
         } catch (Throwable $throwable) {
             $error = $this->truncateRestoreError($throwable->getMessage());
-            $this->logger->warning('Restore preparation failed.', array('error' => $error));
+            $this->logger->error('Restore preparation failed.', $this->exceptionContext($throwable));
             $this->redirectToState('restore_failed', array(self::RESTORE_ERROR_FIELD => $error));
         }
 
@@ -117,8 +117,10 @@ final class RestorePage
             $this->deleteSelectedStagedArchive();
             $this->redirectToState('backup_deleted');
         } catch (Throwable $throwable) {
-            $this->logger->warning('Restore backup deletion failed.');
-            $this->redirectToState('backup_delete_failed');
+            $archive = isset($_POST[self::STAGED_ARCHIVE_FIELD]) ? sanitize_text_field(wp_unslash($_POST[self::STAGED_ARCHIVE_FIELD])) : '';
+            $error = $this->truncateRestoreError($throwable->getMessage());
+            $this->logger->error('Restore backup deletion failed.', $this->exceptionContext($throwable, array('archive' => $archive)));
+            $this->redirectToState('backup_delete_failed', array(self::RESTORE_ERROR_FIELD => $error));
         }
 
         return true;
@@ -146,8 +148,10 @@ final class RestorePage
                 self::INSTALLER_TOKEN_FIELD => $result->token(),
             ));
         } catch (Throwable $throwable) {
-            $this->logger->warning('Installer preparation failed.');
-            $this->redirectToState('installer_failed');
+            $job_id = isset($_POST[self::JOB_ID_FIELD]) ? sanitize_text_field(wp_unslash($_POST[self::JOB_ID_FIELD])) : '';
+            $error = $this->truncateRestoreError($throwable->getMessage());
+            $this->logger->error('Installer preparation failed.', $this->exceptionContext($throwable, array('job_id' => $job_id)));
+            $this->redirectToState('installer_failed', array(self::RESTORE_ERROR_FIELD => $error));
         }
 
         return true;
@@ -199,12 +203,26 @@ final class RestorePage
     {
         $error = isset($_GET[self::RESTORE_ERROR_FIELD]) ? sanitize_text_field(wp_unslash($_GET[self::RESTORE_ERROR_FIELD])) : '';
 
-        return $this->truncateRestoreError($error);
+        return $error === '' ? '' : $this->truncateRestoreError($error);
     }
 
     private function truncateRestoreError(string $error): string
     {
-        return substr($error, 0, 500);
+        $error = trim($error);
+
+        return substr($error !== '' ? $error : 'An unexpected error occurred.', 0, 500);
+    }
+
+    /**
+     * @param array<string,mixed> $context
+     * @return array<string,mixed>
+     */
+    private function exceptionContext(Throwable $throwable, array $context = array()): array
+    {
+        return array_merge($context, array(
+            'exception' => get_class($throwable),
+            'error' => $throwable->getMessage(),
+        ));
     }
 
     private function restoreJob(): ?Job

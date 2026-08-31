@@ -264,8 +264,9 @@ final class RestorePageTest extends TestCase
         $html = (string) ob_get_clean();
 
         self::assertFileExists($outside_path);
-        self::assertSame('https://example.com/wp-admin/admin.php?page=super-sheep-copy-restore&super_sheep_copy_status=backup_delete_failed', $GLOBALS['ssc_test_redirect']);
+        self::assertSame('https://example.com/wp-admin/admin.php?page=super-sheep-copy-restore&super_sheep_copy_status=backup_delete_failed&super_sheep_copy_restore_error=Invalid+staged+archive.', $GLOBALS['ssc_test_redirect']);
         self::assertStringContainsString('Backup package deletion failed.', $html);
+        self::assertStringContainsString('Reason: Invalid staged archive.', $html);
 
         unlink($outside_path);
     }
@@ -277,11 +278,12 @@ final class RestorePageTest extends TestCase
         $_REQUEST['super_sheep_copy_nonce'] = 'test-nonce';
         $_FILES['super_sheep_copy_restore_archive'] = array('name' => 'backup.zip', 'tmp_name' => '/tmp/backup.zip', 'error' => UPLOAD_ERR_OK, 'size' => 123);
 
+        $logger = new RestorePageLogger();
         $page = new RestorePage(
             new Capability(),
             new Nonce(),
             new RestorePageEnvironmentChecker(),
-            new RestorePageLogger(),
+            $logger,
             new RestorePagePreparationManager(true),
             new RestorePageJobRepository(),
             new RestorePageInstallerPreparationManager()
@@ -293,6 +295,8 @@ final class RestorePageTest extends TestCase
 
         self::assertSame('https://example.com/wp-admin/admin.php?page=super-sheep-copy-restore&super_sheep_copy_status=restore_failed&super_sheep_copy_restore_error=restore+failed', $GLOBALS['ssc_test_redirect']);
         self::assertStringContainsString('Reason: restore failed', $html);
+        self::assertSame('Restore preparation failed.', $logger->errors[0]['message']);
+        self::assertSame('restore failed', $logger->errors[0]['context']['error']);
     }
 
     public function testPreparedRestoreViewShowsInstallerPreparationForm(): void
@@ -371,11 +375,12 @@ final class RestorePageTest extends TestCase
         $_REQUEST['super_sheep_copy_action'] = 'prepare_installer';
         $_REQUEST['super_sheep_copy_nonce'] = 'test-nonce';
 
+        $logger = new RestorePageLogger();
         $page = new RestorePage(
             new Capability(),
             new Nonce(),
             new RestorePageEnvironmentChecker(),
-            new RestorePageLogger(),
+            $logger,
             new RestorePagePreparationManager(),
             new RestorePageJobRepository(),
             new RestorePageInstallerPreparationManager(true)
@@ -385,7 +390,9 @@ final class RestorePageTest extends TestCase
         $page->render();
         ob_end_clean();
 
-        self::assertSame('https://example.com/wp-admin/admin.php?page=super-sheep-copy-restore&super_sheep_copy_status=installer_failed', $GLOBALS['ssc_test_redirect']);
+        self::assertSame('https://example.com/wp-admin/admin.php?page=super-sheep-copy-restore&super_sheep_copy_status=installer_failed&super_sheep_copy_restore_error=installer+failed', $GLOBALS['ssc_test_redirect']);
+        self::assertSame('Installer preparation failed.', $logger->errors[0]['message']);
+        self::assertSame('restore-123', $logger->errors[0]['context']['job_id']);
     }
 
     public function testInstallerPreparedViewShowsLaunchLinkWithToken(): void
@@ -606,6 +613,9 @@ final class RestorePageEnvironmentChecker implements EnvironmentCheckerInterface
 
 final class RestorePageLogger implements LoggerInterface
 {
+    /** @var list<array{message:string,context:array<string,mixed>}> */
+    public array $errors = array();
+
     public function info(string $message, array $context = array()): void
     {
     }
@@ -616,5 +626,6 @@ final class RestorePageLogger implements LoggerInterface
 
     public function error(string $message, array $context = array()): void
     {
+        $this->errors[] = compact('message', 'context');
     }
 }

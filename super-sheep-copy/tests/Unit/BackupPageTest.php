@@ -19,6 +19,7 @@ use SuperSheepCopy\Security\Nonce;
 use SuperSheepCopy\Settings\BackupSettings;
 use SuperSheepCopy\Settings\BackupSettingsRepository;
 use SuperSheepCopy\Support\EnvironmentCheckerInterface;
+use SuperSheepCopy\Support\LoggerInterface;
 
 final class BackupPageTest extends TestCase
 {
@@ -740,7 +741,7 @@ final class BackupPageTest extends TestCase
 
         $page->handleActions();
 
-        self::assertSame('https://example.com/wp-admin/admin.php?page=super-sheep-copy&super_sheep_copy_status=download_failed', $GLOBALS['ssc_test_redirect']);
+        self::assertSame('https://example.com/wp-admin/admin.php?page=super-sheep-copy&super_sheep_copy_status=download_failed&super_sheep_copy_error=Folder+package+backups+stay+on+the+server+and+cannot+be+downloaded.', $GLOBALS['ssc_test_redirect']);
     }
 
     public function testPostQueuesBackupAndRedirectsWithSuccess(): void
@@ -815,18 +816,24 @@ final class BackupPageTest extends TestCase
         $_REQUEST['super_sheep_copy_action'] = 'create_backup';
         $_REQUEST['super_sheep_copy_nonce'] = 'test-nonce';
 
+        $logger = new BackupPageLogger();
         $page = new BackupPage(
             new Capability(),
             new Nonce(),
             new BackupPageEnvironmentChecker(),
             new BackupPageJobRepository(),
             null,
-            null
+            null,
+            null,
+            null,
+            $logger
         );
 
         $page->handleActions();
 
-        self::assertSame('https://example.com/wp-admin/admin.php?page=super-sheep-copy&super_sheep_copy_status=backup_failed', $GLOBALS['ssc_test_redirect']);
+        self::assertSame('https://example.com/wp-admin/admin.php?page=super-sheep-copy&super_sheep_copy_status=backup_failed&super_sheep_copy_error=Backup+services+are+not+configured.', $GLOBALS['ssc_test_redirect']);
+        self::assertSame('Backup creation failed.', $logger->errors[0]['message']);
+        self::assertSame('Backup services are not configured.', $logger->errors[0]['context']['error']);
     }
 
     private function makeDirectory(string $path): string
@@ -989,6 +996,25 @@ final class BackupPageEnvironmentChecker implements EnvironmentCheckerInterface
     public function check(): array
     {
         return array('zip' => array('label' => 'ZIP', 'value' => 'Available', 'status' => 'ok'));
+    }
+}
+
+final class BackupPageLogger implements LoggerInterface
+{
+    /** @var list<array{message:string,context:array<string,mixed>}> */
+    public array $errors = array();
+
+    public function info(string $message, array $context = array()): void
+    {
+    }
+
+    public function warning(string $message, array $context = array()): void
+    {
+    }
+
+    public function error(string $message, array $context = array()): void
+    {
+        $this->errors[] = compact('message', 'context');
     }
 }
 

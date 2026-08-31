@@ -16,6 +16,7 @@ use SuperSheepCopy\Schedule\ScheduleSettingsRepository;
 use SuperSheepCopy\Schedule\ScheduledBackupRunner;
 use SuperSheepCopy\Settings\BackupSettings;
 use SuperSheepCopy\Settings\BackupSettingsRepository;
+use SuperSheepCopy\Support\LoggerInterface;
 
 final class ScheduledBackupRunnerTest extends TestCase
 {
@@ -160,8 +161,9 @@ final class ScheduledBackupRunnerTest extends TestCase
         $job = new Job('backup-scheduled', 'backup', Job::PACKAGING_ARCHIVE, array('trigger' => 'scheduled'));
         $jobs = new ScheduleRunnerJobRepository(array($job));
         (new ScheduleSettingsRepository())->save(ScheduleSettings::fromArray(array('enabled' => true)));
+        $logger = new ScheduleRunnerLogger();
 
-        $this->runner($jobs, new ScheduleRunnerFailingStepRunner())->handleContinuationEvent();
+        $this->runner($jobs, new ScheduleRunnerFailingStepRunner(), null, $logger)->handleContinuationEvent();
 
         $retried = $jobs->find('backup-scheduled');
         self::assertSame(Job::PACKAGING_ARCHIVE, $retried->state());
@@ -169,6 +171,8 @@ final class ScheduledBackupRunnerTest extends TestCase
         self::assertSame('temporary archive failure', $retried->payload()['last_error']);
         self::assertArrayHasKey('super_sheep_copy_scheduled_backup_continue', $GLOBALS['ssc_test_scheduled_events']);
         self::assertSame('queued', (new ScheduleSettingsRepository())->get()->lastStatus());
+        self::assertSame('Scheduled backup step failed.', $logger->errors[0]['message']);
+        self::assertSame('temporary archive failure', $logger->errors[0]['context']['error']);
     }
 
     public function testScheduledStepStopsAfterRetryLimit(): void
@@ -204,7 +208,8 @@ final class ScheduledBackupRunnerTest extends TestCase
     private function runner(
         ScheduleRunnerJobRepository $jobs,
         BackupStepRunnerInterface $step_runner,
-        ?ScheduleRunnerExecutionLock $lock = null
+        ?ScheduleRunnerExecutionLock $lock = null,
+        ?LoggerInterface $logger = null
     ): ScheduledBackupRunner
     {
         return new ScheduledBackupRunner(
@@ -216,8 +221,28 @@ final class ScheduledBackupRunnerTest extends TestCase
             '/tmp/ssc-site',
             sys_get_temp_dir() . '/ssc-test-uploads/super-sheep-copy',
             null,
-            $lock ?? new ScheduleRunnerExecutionLock()
+            $lock ?? new ScheduleRunnerExecutionLock(),
+            $logger
         );
+    }
+}
+
+final class ScheduleRunnerLogger implements LoggerInterface
+{
+    /** @var list<array{message:string,context:array<string,mixed>}> */
+    public array $errors = array();
+
+    public function info(string $message, array $context = array()): void
+    {
+    }
+
+    public function warning(string $message, array $context = array()): void
+    {
+    }
+
+    public function error(string $message, array $context = array()): void
+    {
+        $this->errors[] = compact('message', 'context');
     }
 }
 
