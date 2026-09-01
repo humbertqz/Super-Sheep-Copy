@@ -145,7 +145,11 @@
         try {
             payload = JSON.parse(text);
         } catch (error) {
-            return text || '';
+            if (/<!doctype html|<html[\s>]/i.test(text)) {
+                return 'Backup step endpoint returned an HTML error page.';
+            }
+
+            return text ? text.slice(0, 500) : '';
         }
 
         if (payload && payload.data) {
@@ -172,6 +176,14 @@
             || message.indexOf('NetworkError') !== -1;
     }
 
+    function backupEndpoint() {
+        if (window.superSheepCopyAdmin && typeof window.superSheepCopyAdmin.ajaxUrl === 'string') {
+            return window.superSheepCopyAdmin.ajaxUrl;
+        }
+
+        return typeof window.ajaxurl === 'string' ? window.ajaxurl : '';
+    }
+
     function deleteConfirmationMessage(form) {
         var input = form.querySelector('input[name="job_id"]');
         var jobId = input && input.value ? input.value : 'this backup';
@@ -181,7 +193,8 @@
 
     function runStep(row, retry) {
         row = jobRow(row);
-        if (!row || typeof window.ajaxurl !== 'string') {
+        var endpoint = backupEndpoint();
+        if (!row || endpoint === '') {
             return;
         }
 
@@ -194,7 +207,7 @@
             body.set('retry', '1');
         }
 
-        window.fetch(window.ajaxurl, {
+        window.fetch(endpoint, {
             method: 'POST',
             credentials: 'same-origin',
             headers: {

@@ -16,6 +16,7 @@ final class AdminAssetTest extends TestCase
         self::assertStringContainsString('response.ok', $script);
         self::assertStringContainsString('response.text().then(function (text)', $script);
         self::assertStringContainsString('backupErrorMessage(text)', $script);
+        self::assertStringContainsString("Backup step endpoint returned an HTML error page.", $script);
         self::assertStringContainsString('Unable to parse backup step response.', $script);
         self::assertStringContainsString('data-super-sheep-copy-retry-job', $script);
     }
@@ -28,6 +29,15 @@ final class AdminAssetTest extends TestCase
         self::assertStringContainsString('Request timed out. Continuing backup...', $script);
         self::assertStringContainsString('window.setTimeout(function () {', $script);
         self::assertStringContainsString('runStep(row, false);', $script);
+    }
+
+    public function testAdminScriptUsesItsOwnWordPressGeneratedAjaxEndpoint(): void
+    {
+        $script = (string) file_get_contents(dirname(__DIR__, 2) . '/assets/admin.js');
+
+        self::assertStringContainsString('function backupEndpoint()', $script);
+        self::assertStringContainsString('window.superSheepCopyAdmin.ajaxUrl', $script);
+        self::assertStringContainsString('window.fetch(endpoint, {', $script);
     }
 
     public function testAdminScriptNormalizesRunStepCallbackArgumentsBeforeQueryingRows(): void

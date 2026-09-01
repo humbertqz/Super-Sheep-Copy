@@ -143,6 +143,9 @@ final class AdminMenu
             SUPER_SHEEP_COPY_VERSION,
             true
         );
+        wp_localize_script('super-sheep-copy-admin', 'superSheepCopyAdmin', array(
+            'ajaxUrl' => admin_url('admin-ajax.php'),
+        ));
     }
 
     private function backupPage(): BackupPage

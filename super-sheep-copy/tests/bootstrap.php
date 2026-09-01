@@ -336,6 +336,13 @@ if (!function_exists('admin_url')) {
     }
 }
 
+if (!function_exists('wp_localize_script')) {
+    function wp_localize_script(string $handle, string $object_name, array $data): bool
+    {
+        return true;
+    }
+}
+
 if (!function_exists('add_query_arg')) {
     function add_query_arg(array $args, string $url): string
     {

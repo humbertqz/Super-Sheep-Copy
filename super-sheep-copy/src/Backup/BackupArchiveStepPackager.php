@@ -39,6 +39,9 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
 
     public function packageStep(string $job_id, string $working_directory, string $database_directory, array $site_files, array $metadata, array $payload): array
     {
+        if (!is_dir($working_directory)) {
+            throw new RuntimeException('Backup working directory is missing. Restart this backup.');
+        }
         if ($this->hasArchiveEntries($payload) && $this->archiveEntriesPath($payload) === '') {
             throw new RuntimeException('Restart this backup to use streaming packaging.');
         }
@@ -60,6 +63,7 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
         $writer = $this->writerForPayload($payload);
         $writer->open($this->writePathForPayload($archive_path, $payload));
 
+        try {
         $effective_batch_size = $this->effectiveBatchSize($payload);
         $payload['archive_effective_batch_size'] = $effective_batch_size;
         $entries = $this->readArchiveEntriesBatch($this->archiveEntriesPath($payload), $index, $effective_batch_size);
@@ -114,11 +118,13 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
             return $payload;
         }
 
-        $writer->close();
         $payload['archive_complete'] = false;
         $payload['message'] = $this->progressMessage($payload, $total_entries);
 
         return $payload;
+        } finally {
+            $writer->close();
+        }
     }
 
     /**
@@ -497,6 +503,10 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
 
     private function appendChecksum(string $path, string $archive_name, string $checksum): void
     {
+        if (!is_dir(dirname($path))) {
+            throw new RuntimeException('Backup working directory disappeared during packaging. Restart this backup.');
+        }
+
         $encoded = json_encode(array('path' => $archive_name, 'checksum' => $checksum), JSON_UNESCAPED_SLASHES);
         if (!is_string($encoded) || file_put_contents($path, $encoded . "\n", FILE_APPEND) === false) {
             throw new RuntimeException('Unable to append archive checksum.');

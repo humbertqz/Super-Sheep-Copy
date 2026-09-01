@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace SuperSheepCopy\Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
+use RuntimeException;
 use SuperSheepCopy\Backup\BackupArchiveStepPackager;
 use SuperSheepCopy\Backup\ManifestBuilder;
 use SuperSheepCopy\Backup\Package\DirectoryPackageWriter;
@@ -82,6 +83,17 @@ final class BackupArchiveStepPackagerTest extends TestCase
         self::assertSame(hash('sha256', '{"tables":[]}'), $manifest['checksums']['database/tables.json']);
         self::assertSame(hash('sha256', 'CREATE TABLE wp_posts;'), $manifest['checksums']['database/chunks/wp_posts.part001.sql']);
         $zip->close();
+    }
+
+    public function testPackagingReportsAMissingWorkingDirectory(): void
+    {
+        $packager = new BackupArchiveStepPackager(new ManifestBuilder('0.1.0', '1'));
+        $working_directory = $this->root . '/missing-working-directory';
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Backup working directory is missing. Restart this backup.');
+
+        $packager->packageStep('backup-123', $working_directory, $working_directory . '/database', array(), $this->metadata(), array());
     }
 
     public function testPackagesScannedFileManifestInBoundedBatches(): void
