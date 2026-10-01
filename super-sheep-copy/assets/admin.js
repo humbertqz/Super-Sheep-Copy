@@ -170,7 +170,8 @@
     function isTransientStepError(error) {
         var message = error && error.message ? error.message : '';
 
-        return message.indexOf('Request Timeout') !== -1
+        return [408, 429, 500, 502, 503, 504].indexOf(error && error.status) !== -1
+            || message.indexOf('Request Timeout') !== -1
             || message.indexOf('HTTP 500') !== -1
             || message.indexOf('Failed to fetch') !== -1
             || message.indexOf('NetworkError') !== -1;
@@ -191,7 +192,7 @@
         return 'Delete backup ' + jobId + '?\n\nThis permanently removes the job and all backup files. This cannot be undone.';
     }
 
-    function runStep(row, retry) {
+    function runStep(row, retry, failures) {
         row = jobRow(row);
         var endpoint = backupEndpoint();
         if (!row || endpoint === '') {
@@ -199,6 +200,7 @@
         }
 
         hideRetry(row);
+        failures = failures || 0;
         var body = new window.URLSearchParams();
         body.set('action', 'super_sheep_copy_run_backup_step');
         body.set('job_id', row.getAttribute('data-super-sheep-copy-job-id') || '');
@@ -218,7 +220,9 @@
             return response.text().then(function (text) {
                 if (!response.ok) {
                     var message = backupErrorMessage(text);
-                    throw new Error(message || 'Backup step request failed with HTTP ' + response.status + '.');
+                    var requestError = new Error('Backup step request failed with HTTP ' + response.status + '.' + (message ? ' ' + message : ''));
+                    requestError.status = response.status;
+                    throw requestError;
                 }
 
                 return text;
@@ -251,10 +255,15 @@
             }
         }).catch(function (error) {
             if (isTransientStepError(error)) {
-                showProgressMessage(row, 'Request timed out. Continuing backup...');
+                if (failures >= 6) {
+                    showProgressMessage(row, 'The server is still unavailable. Use Retry / Continue backup to resume.');
+                    showRetry(row);
+                    return;
+                }
+                showProgressMessage(row, 'The server is busy or the request timed out. Retrying backup...');
                 window.setTimeout(function () {
-                    runStep(row, false);
-                }, 5000);
+                    runStep(row, retry, failures + 1);
+                }, Math.min(30000, 5000 * Math.pow(2, failures)));
                 return;
             }
 

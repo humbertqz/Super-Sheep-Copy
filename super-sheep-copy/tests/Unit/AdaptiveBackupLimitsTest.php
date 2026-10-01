@@ -69,9 +69,33 @@ final class AdaptiveBackupLimitsTest extends TestCase
     {
         $limits = new AdaptiveBackupLimits();
 
-        self::assertSame(30.0, $limits->archiveTimeBudgetSeconds(array(
-            'archive_adaptive_time_budget_seconds' => 20.0,
-            'archive_last_step_seconds' => 5.0,
+        self::assertSame(6.0, $limits->archiveTimeBudgetSeconds(array(
+            'archive_adaptive_time_budget_seconds' => 5.0,
+            'archive_last_step_seconds' => 2.0,
+        )));
+    }
+
+    public function testArchiveBudgetsClampLegacyValuesAndShrinkAfterSlowClose(): void
+    {
+        $limits = new AdaptiveBackupLimits();
+
+        self::assertSame(10.0, $limits->archiveTimeBudgetSeconds(array('archive_adaptive_time_budget_seconds' => 45.0)));
+        self::assertSame(5.0, $limits->archiveTimeBudgetSeconds(array(
+            'archive_adaptive_time_budget_seconds' => 45.0,
+            'archive_last_step_seconds' => 35.0,
+        )));
+        self::assertSame(8 * 1048576, $limits->archiveBatchBytes(array()));
+        self::assertSame(2 * 1048576, $limits->archiveBatchBytes(array(
+            'archive_last_step_bytes' => 8 * 1048576,
+            'archive_last_step_seconds' => 20.0,
+        )));
+        self::assertSame(1048576, $limits->archiveBatchBytes(array(
+            'archive_last_step_bytes' => 10,
+            'archive_last_step_seconds' => 20.0,
+        )));
+        self::assertSame(32 * 1048576, $limits->archiveBatchBytes(array(
+            'archive_last_step_bytes' => 8 * 1048576,
+            'archive_last_step_seconds' => 0.001,
         )));
     }
 }

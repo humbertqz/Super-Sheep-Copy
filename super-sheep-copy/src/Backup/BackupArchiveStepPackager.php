@@ -20,7 +20,7 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
 {
     private const DEFAULT_BATCH_SIZE = 2000;
     private const ZIP_FALLBACK_BATCH_SIZE = 50;
-    private const DEFAULT_TIME_BUDGET_SECONDS = 20.0;
+    private const DEFAULT_TIME_BUDGET_SECONDS = 10.0;
 
     private ManifestBuilder $manifest_builder;
     private int $batch_size;
@@ -39,6 +39,7 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
 
     public function packageStep(string $job_id, string $working_directory, string $database_directory, array $site_files, array $metadata, array $payload): array
     {
+        $step_start_time = microtime(true);
         if (!is_dir($working_directory)) {
             throw new RuntimeException('Backup working directory is missing. Restart this backup.');
         }
@@ -55,10 +56,11 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
         }
         $offset = isset($payload['archive_entries_offset']) ? (int) $payload['archive_entries_offset'] : 0;
         $step_start_index = $index;
-        $step_start_time = microtime(true);
         $effective_time_budget = $this->time_budget_seconds > 0.0
-            ? max($this->time_budget_seconds, $this->adaptive_limits->archiveTimeBudgetSeconds($payload))
+            ? min($this->time_budget_seconds, $this->adaptive_limits->archiveTimeBudgetSeconds($payload))
             : 0.0;
+        $byte_budget = $this->adaptive_limits->archiveBatchBytes($payload);
+        $payload['archive_effective_batch_bytes'] = $byte_budget;
         $payload['archive_adaptive_time_budget_seconds'] = $effective_time_budget;
         $step_bytes = 0;
         if (!isset($payload['archive_started_at'])) {
@@ -73,6 +75,10 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
         $entries = $this->readArchiveEntriesBatch($this->archiveEntriesPath($payload), $offset, $effective_batch_size);
         foreach ($entries as $item) {
             $entry = $item['entry'];
+            $entry_bytes = isset($entry['size']) && is_numeric($entry['size']) ? max(0, (int) $entry['size']) : 0;
+            if ($step_bytes > 0 && $step_bytes + $entry_bytes > $byte_budget && empty($entry['symlink'])) {
+                break;
+            }
             $offset = $item['next_offset'];
             $index++;
             if (!empty($entry['symlink'])) {
@@ -103,9 +109,12 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
             if ($entry_size !== false) {
                 $step_bytes += (int) $entry_size;
             }
-            if ($index > $step_start_index && microtime(true) - $step_start_time >= $effective_time_budget) {
+            if ($step_bytes >= $byte_budget || microtime(true) - $step_start_time >= $effective_time_budget) {
                 break;
             }
+        }
+        } finally {
+            $writer->close();
         }
 
         $payload['archive_index'] = $index;
@@ -114,8 +123,20 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
         $payload = $this->addProgressMetrics($payload, $total_entries, $step_start_index, $step_start_time, $step_bytes);
 
         if ($index >= $total_entries) {
-            $writer->close();
-            $payload = $this->stabilizeMetadata($archive_path, $job_id, $metadata, $payload);
+            $payload['archive_eta_seconds'] = null;
+            if ($index > $step_start_index && microtime(true) - $step_start_time >= $effective_time_budget) {
+                $payload['archive_complete'] = false;
+                $payload['message'] = 'Archive entries saved. Finalizing backup metadata...';
+
+                return $payload;
+            }
+            $payload = $this->stabilizeMetadata($archive_path, $job_id, $metadata, $payload, $step_start_time, $effective_time_budget);
+            if (empty($payload['archive_metadata_complete'])) {
+                $payload['archive_complete'] = false;
+                $payload['message'] = 'Finalizing backup metadata...';
+
+                return $payload;
+            }
             if ((isset($payload['package_format']) ? (string) $payload['package_format'] : '') === 'tar.gz') {
                 $payload = $this->finalizeTarGzPackage($archive_path, $payload);
             }
@@ -129,9 +150,6 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
         $payload['message'] = $this->progressMessage($payload, $total_entries);
 
         return $payload;
-        } finally {
-            $writer->close();
-        }
     }
 
     /**
@@ -293,10 +311,11 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
      * @param array<string,mixed> $payload
      * @return array<string,mixed>
      */
-    private function stabilizeMetadata(string $archive_path, string $job_id, array $metadata, array $payload): array
+    private function stabilizeMetadata(string $archive_path, string $job_id, array $metadata, array $payload, float $step_start_time, float $time_budget): array
     {
-        $archive_size = 0;
-        for ($attempt = 0; $attempt < 5; $attempt++) {
+        $archive_size = isset($payload['archive_size']) ? (int) $payload['archive_size'] : 0;
+        $attempt = isset($payload['archive_metadata_attempts']) ? (int) $payload['archive_metadata_attempts'] : 0;
+        for (; $attempt < 5; $attempt++) {
             $payload['archive_size'] = $archive_size;
             $this->writeMetadata($archive_path, $job_id, $metadata, $payload);
             clearstatcache(true, $archive_path);
@@ -308,15 +327,24 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
             if ($new_archive_size === $archive_size) {
                 $payload['archive_size'] = $archive_size;
                 $payload['archive_size_stabilized'] = true;
+                $payload['archive_metadata_complete'] = true;
 
                 return $payload;
             }
 
             $archive_size = $new_archive_size;
+            $payload['archive_size'] = $archive_size;
+            $payload['archive_metadata_attempts'] = $attempt + 1;
+            if ($attempt + 1 < 5 && microtime(true) - $step_start_time >= $time_budget) {
+                $payload['archive_metadata_complete'] = false;
+
+                return $payload;
+            }
         }
 
         $payload['archive_size'] = $archive_size;
         $payload['archive_size_stabilized'] = false;
+        $payload['archive_metadata_complete'] = true;
 
         return $payload;
     }

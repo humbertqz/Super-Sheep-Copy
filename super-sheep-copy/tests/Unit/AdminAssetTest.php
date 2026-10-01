@@ -26,9 +26,9 @@ final class AdminAssetTest extends TestCase
         $script = (string) file_get_contents(dirname(__DIR__, 2) . '/assets/admin.js');
 
         self::assertStringContainsString('function isTransientStepError(error)', $script);
-        self::assertStringContainsString('Request timed out. Continuing backup...', $script);
+        self::assertStringContainsString('The server is busy or the request timed out. Retrying backup...', $script);
         self::assertStringContainsString('window.setTimeout(function () {', $script);
-        self::assertStringContainsString('runStep(row, false);', $script);
+        self::assertStringContainsString('runStep(row, retry, failures + 1);', $script);
     }
 
     public function testAdminScriptUsesItsOwnWordPressGeneratedAjaxEndpoint(): void

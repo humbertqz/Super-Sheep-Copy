@@ -107,8 +107,9 @@ final class IncrementalArchiveValidator
             : 'Validated ' . $index . ' of ' . count($entries) . ' backup entries.';
 
         if ($payload['validation_complete']) {
+            $entry_lookup = array_fill_keys($entries, true);
             foreach ($checksums as $entry => $checksum) {
-                if (!is_string($entry) || !in_array($entry, $entries, true)) {
+                if (!is_string($entry) || !isset($entry_lookup[$entry])) {
                     $payload['validation_errors'][] = 'Unexpected checksum for archive entry: ' . (string) $entry;
                 }
             }

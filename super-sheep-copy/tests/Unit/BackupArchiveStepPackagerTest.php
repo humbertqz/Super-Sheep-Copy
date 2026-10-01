@@ -330,6 +330,57 @@ final class BackupArchiveStepPackagerTest extends TestCase
         self::assertSame(1, $payload['archive_index']);
     }
 
+    public function testPackagingBoundsQueuedBytesAndResumesWithoutSkippingEntries(): void
+    {
+        $size = 5 * 1048576;
+        file_put_contents($this->root . '/site/uploads/a.txt', str_repeat('a', $size));
+        file_put_contents($this->root . '/site/uploads/b.txt', str_repeat('b', $size));
+        $packager = new BackupArchiveStepPackager(new ManifestBuilder('0.1.0', '1'), 2000, 10.0,
+            new PackageWriterFactory(array(new DirectoryPackageWriter())));
+        $files = array(
+            new ScannedFile($this->root . '/site/uploads/a.txt', 'uploads/a.txt', $size, false),
+            new ScannedFile($this->root . '/site/uploads/b.txt', 'uploads/b.txt', $size, false),
+        );
+
+        $payload = $packager->packageStep('backup-bytes', $this->root . '/working', $this->root . '/working/database', $files, $this->metadata(), array());
+
+        self::assertSame(1, $payload['archive_index']);
+        self::assertSame($size, $payload['archive_last_step_bytes']);
+        self::assertFileDoesNotExist($payload['archive_path'] . '/files/uploads/b.txt');
+        $payload = $packager->packageStep('backup-bytes', $this->root . '/working', $this->root . '/working/database', $files, $this->metadata(), $payload);
+        self::assertTrue($payload['archive_complete']);
+        self::assertSame(4, $payload['archive_index']);
+        self::assertSame(hash('sha256', str_repeat('b', $size)), hash_file('sha256', $payload['archive_path'] . '/files/uploads/b.txt'));
+    }
+
+    public function testPackagingMeasuresCloseAndCheckpointsSlowMetadataWrites(): void
+    {
+        $writer = new StepPackagerRecordingWriter('zip', '.zip', 30000);
+        $packager = new BackupArchiveStepPackager(new ManifestBuilder('0.1.0', '1'), 2000, 0.01,
+            new PackageWriterFactory(array($writer)));
+        $files = array(new ScannedFile($this->root . '/site/uploads/a.txt', 'uploads/a.txt', 1, false));
+        $payload = array();
+        do {
+            $payload = $packager->packageStep('backup-slow', $this->root . '/working', $this->root . '/working/database', $files, $this->metadata(), $payload);
+            self::assertGreaterThanOrEqual(0.03, $payload['archive_last_step_seconds']);
+        } while ($payload['archive_index'] < $payload['archive_entry_count']);
+
+        self::assertFalse($payload['archive_complete']);
+        self::assertNull($payload['archive_eta_seconds']);
+        self::assertSame(0.01, $payload['archive_adaptive_time_budget_seconds']);
+        $payload = $packager->packageStep('backup-slow', $this->root . '/working', $this->root . '/working/database', $files, $this->metadata(), $payload);
+        self::assertFalse($payload['archive_complete']);
+        self::assertSame(1, $payload['archive_metadata_attempts']);
+        self::assertStringContainsString('Finalizing', $payload['message']);
+
+        for ($attempt = 0; $attempt < 5 && !$payload['archive_complete']; $attempt++) {
+            $payload = $packager->packageStep('backup-slow', $this->root . '/working', $this->root . '/working/database', $files, $this->metadata(), $payload);
+        }
+        self::assertTrue($payload['archive_complete']);
+        self::assertTrue($payload['archive_size_stabilized']);
+        self::assertSame(3, $payload['archive_index']);
+    }
+
     public function testPackagingProgressMessageIncludesRateAndEta(): void
     {
         if (!class_exists(ZipArchive::class)) {
@@ -545,11 +596,14 @@ final class StepPackagerRecordingWriter implements PackageWriterInterface
 {
     private string $format;
     private string $extension;
+    private int $close_delay;
+    private bool $open = false;
 
-    public function __construct(string $format, string $extension)
+    public function __construct(string $format, string $extension, int $close_delay = 0)
     {
         $this->format = $format;
         $this->extension = $extension;
+        $this->close_delay = $close_delay;
     }
 
     public function format(): string
@@ -569,6 +623,8 @@ final class StepPackagerRecordingWriter implements PackageWriterInterface
 
     public function open(string $package_path): void
     {
+        $this->open = true;
+        file_put_contents($package_path, 'recording writer');
     }
 
     public function addFile(string $source_path, string $entry_path): void
@@ -581,5 +637,9 @@ final class StepPackagerRecordingWriter implements PackageWriterInterface
 
     public function close(): void
     {
+        if ($this->open && $this->close_delay > 0) {
+            usleep($this->close_delay);
+        }
+        $this->open = false;
     }
 }

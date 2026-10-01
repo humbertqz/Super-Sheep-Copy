@@ -10,8 +10,8 @@ final class AdaptiveBackupLimits
     private const DATABASE_MAX = 50000;
     private const FILE_SCAN_MIN = 1000;
     private const FILE_SCAN_MAX = 5000;
-    private const ARCHIVE_MIN_SECONDS = 20.0;
-    private const ARCHIVE_MAX_SECONDS = 45.0;
+    private const ARCHIVE_MIN_SECONDS = 5.0;
+    private const ARCHIVE_MAX_SECONDS = 10.0;
 
     /**
      * @param array<string,mixed> $payload
@@ -57,18 +57,29 @@ final class AdaptiveBackupLimits
      */
     public function archiveTimeBudgetSeconds(array $payload): float
     {
-        $current = $this->floatPayload($payload, 'archive_adaptive_time_budget_seconds', self::ARCHIVE_MIN_SECONDS);
+        $current = max(self::ARCHIVE_MIN_SECONDS, min(self::ARCHIVE_MAX_SECONDS, $this->floatPayload($payload, 'archive_adaptive_time_budget_seconds', self::ARCHIVE_MIN_SECONDS)));
         $seconds = $this->floatPayload($payload, 'archive_last_step_seconds', 0.0);
 
-        if ($seconds > 0.0 && $seconds < 10.0) {
-            return min(self::ARCHIVE_MAX_SECONDS, $current + 10.0);
+        if ($seconds > 0.0 && $seconds < 3.0) {
+            return min(self::ARCHIVE_MAX_SECONDS, $current + 1.0);
         }
 
-        if ($seconds > 45.0) {
-            return max(self::ARCHIVE_MIN_SECONDS, $current - 10.0);
+        if ($seconds > 10.0) {
+            return max(self::ARCHIVE_MIN_SECONDS, $current / 2);
         }
 
         return max(self::ARCHIVE_MIN_SECONDS, min(self::ARCHIVE_MAX_SECONDS, $current));
+    }
+
+    /** @param array<string,mixed> $payload */
+    public function archiveBatchBytes(array $payload): int
+    {
+        // ZIP defers compression until close(); bound queued bytes using the full previous step.
+        $bytes = $this->intPayload($payload, 'archive_last_step_bytes', 0);
+        $seconds = $this->floatPayload($payload, 'archive_last_step_seconds', 0.0);
+        $budget = $bytes > 0 && $seconds > 0.0 ? (int) ($bytes / $seconds * self::ARCHIVE_MIN_SECONDS) : 8 * 1048576;
+
+        return max(1048576, min(32 * 1048576, $budget));
     }
 
     /**
