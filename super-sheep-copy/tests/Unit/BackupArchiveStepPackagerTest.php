@@ -117,6 +117,8 @@ final class BackupArchiveStepPackagerTest extends TestCase
         self::assertFalse($payload['archive_complete']);
         self::assertSame(1, $payload['archive_index']);
         self::assertSame(2, $payload['archive_site_file_count']);
+        $entry_lines = explode("\n", (string) file_get_contents($payload['archive_entries_path']));
+        self::assertSame(strlen($entry_lines[0]) + 1, $payload['archive_entries_offset']);
         self::assertStringContainsString('"path":"files/uploads/a.txt"', (string) file_get_contents($payload['archive_checksums_path']));
     }
 
@@ -435,6 +437,20 @@ final class BackupArchiveStepPackagerTest extends TestCase
         $this->expectExceptionMessage('Restart this backup to use streaming packaging.');
         (new BackupArchiveStepPackager(new ManifestBuilder('0.1.0', '1'), 1))
             ->packageStep('backup-123', $this->root . '/working', $this->root . '/working/database', array(), $this->metadata(), $payload);
+    }
+
+    public function testPackagingRejectsInProgressPayloadWithoutStreamingOffset(): void
+    {
+        $path = $this->root . '/working/archive-entries.jsonl';
+        file_put_contents($path, "{}\n");
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Restart this backup to use offset-based streaming packaging.');
+        (new BackupArchiveStepPackager(new ManifestBuilder('0.1.0', '1')))
+            ->packageStep('backup-123', $this->root . '/working', $this->root . '/working/database', array(), $this->metadata(), array(
+                'archive_entries_path' => $path,
+                'archive_index' => 1,
+            ));
     }
 
     /**

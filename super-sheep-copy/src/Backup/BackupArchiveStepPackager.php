@@ -50,6 +50,10 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
         }
         $archive_path = isset($payload['archive_path']) ? (string) $payload['archive_path'] : '';
         $index = isset($payload['archive_index']) ? (int) $payload['archive_index'] : 0;
+        if (!isset($payload['archive_entries_offset']) && $index > 0) {
+            throw new RuntimeException('Restart this backup to use offset-based streaming packaging.');
+        }
+        $offset = isset($payload['archive_entries_offset']) ? (int) $payload['archive_entries_offset'] : 0;
         $step_start_index = $index;
         $step_start_time = microtime(true);
         $effective_time_budget = $this->time_budget_seconds > 0.0
@@ -66,8 +70,10 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
         try {
         $effective_batch_size = $this->effectiveBatchSize($payload);
         $payload['archive_effective_batch_size'] = $effective_batch_size;
-        $entries = $this->readArchiveEntriesBatch($this->archiveEntriesPath($payload), $index, $effective_batch_size);
-        foreach ($entries as $entry) {
+        $entries = $this->readArchiveEntriesBatch($this->archiveEntriesPath($payload), $offset, $effective_batch_size);
+        foreach ($entries as $item) {
+            $entry = $item['entry'];
+            $offset = $item['next_offset'];
             $index++;
             if (!empty($entry['symlink'])) {
                 continue;
@@ -103,6 +109,7 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
         }
 
         $payload['archive_index'] = $index;
+        $payload['archive_entries_offset'] = $offset;
         $total_entries = isset($payload['archive_entry_count']) ? (int) $payload['archive_entry_count'] : 0;
         $payload = $this->addProgressMetrics($payload, $total_entries, $step_start_index, $step_start_time, $step_bytes);
 
@@ -153,6 +160,7 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
         unset($payload['archive_entries'], $payload['archive_checksums']);
         $payload['archive_entry_count'] = (isset($payload['scanned_file_count']) ? (int) $payload['scanned_file_count'] : count($site_files)) + count($database_files);
         $payload['archive_index'] = 0;
+        $payload['archive_entries_offset'] = 0;
         $payload['archive_site_file_count'] = isset($payload['scanned_file_count']) ? (int) $payload['scanned_file_count'] : count($site_files);
         $payload['archive_database_file_count'] = count($database_files);
         $payload['archive_started_at'] = microtime(true);
@@ -469,22 +477,23 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
         }
     }
 
-    /** @return list<array<string,mixed>> */
-    private function readArchiveEntriesBatch(string $path, int $start, int $limit): array
+    /** @return list<array{entry:array<string,mixed>,next_offset:int}> */
+    private function readArchiveEntriesBatch(string $path, int $offset, int $limit): array
     {
         $handle = fopen($path, 'rb');
         if ($handle === false) {
             throw new RuntimeException('Missing archive entries manifest. Restart this backup to use streaming packaging.');
         }
+        if (fseek($handle, $offset) !== 0) {
+            fclose($handle);
+            throw new RuntimeException('Unable to resume archive entries manifest. Restart this backup.');
+        }
         $entries = array();
-        $line_number = 0;
         while (($line = fgets($handle)) !== false) {
-            if ($line_number++ < $start) {
-                continue;
-            }
+            $next_offset = ftell($handle);
             $entry = json_decode($line, true);
             if (is_array($entry)) {
-                $entries[] = $entry;
+                $entries[] = array('entry' => $entry, 'next_offset' => $next_offset);
             }
             if (count($entries) >= $limit) {
                 break;
