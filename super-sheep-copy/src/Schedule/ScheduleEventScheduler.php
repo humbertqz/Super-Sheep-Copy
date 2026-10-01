@@ -39,7 +39,7 @@ final class ScheduleEventScheduler
         wp_schedule_single_event($this->calculator->nextRunTimestamp($settings, $now), self::DUE_HOOK);
     }
 
-    public function scheduleContinuation(int $delay_seconds = 60): void
+    public function scheduleContinuation(int $delay_seconds = 5): void
     {
         if (!function_exists('wp_schedule_single_event')) {
             return;

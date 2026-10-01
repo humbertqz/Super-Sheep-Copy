@@ -108,6 +108,7 @@ final class BackupStepRunner implements BackupStepRunnerInterface
         $payload['database_chunk_number'] = 1;
         $payload['database_last_seen_id'] = null;
         $payload['database_schemas'] = array();
+        $payload['database_columns'] = array();
         $payload['database_plans_by_table'] = array();
         $payload['database_primary_key_upper_bounds'] = array();
         $payload['message'] = 'Starting database export.';
@@ -128,9 +129,13 @@ final class BackupStepRunner implements BackupStepRunnerInterface
             return $this->save($job->id(), Job::SCANNING_FILES, $payload);
         }
 
+        $step_start = microtime(true);
         $table = (string) $tables[$table_index];
-        $schema = $this->database->getSchema($table);
-        $columns = $this->database->getColumns($table);
+        $schema = isset($payload['database_schemas'][$table])
+            ? $this->schemaFromArray($payload['database_schemas'][$table])
+            : $this->database->getSchema($table);
+        $columns = $payload['database_columns'][$table] ?? $this->database->getColumns($table);
+        $payload['database_columns'][$table] = $columns;
         $chunk_size = $schema->primaryKey() !== null && $schema->primaryKey() !== ''
             ? $this->adaptive_limits->databaseChunkSize($payload)
             : (int) $this->intPayload($payload, 'database_chunk_size');
@@ -149,7 +154,6 @@ final class BackupStepRunner implements BackupStepRunnerInterface
             : null;
 
         $plan = $this->chunk_planner->plan($schema, $chunk_size, $chunk_number, $last_seen_id, $upper_bound);
-        $step_start = microtime(true);
         $rows = $this->database->fetchRows($plan, $columns);
         $sql = $chunk_number === 1 ? $this->formatter->formatSchema($schema) : '';
         $sql .= $this->formatter->formatRows($rows);
@@ -177,6 +181,7 @@ final class BackupStepRunner implements BackupStepRunnerInterface
         $table_complete = $step_rows < $chunk_size;
 
         if ($table_complete) {
+            unset($payload['database_columns'][$table]);
             $payload['database_table_index'] = $table_index + 1;
             $payload['database_chunk_number'] = 1;
             $payload['database_last_seen_id'] = null;

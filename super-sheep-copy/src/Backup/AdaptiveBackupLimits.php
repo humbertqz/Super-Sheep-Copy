@@ -79,7 +79,7 @@ final class AdaptiveBackupLimits
         $seconds = $this->floatPayload($payload, 'archive_last_step_seconds', 0.0);
         $budget = $bytes > 0 && $seconds > 0.0 ? (int) ($bytes / $seconds * self::ARCHIVE_MIN_SECONDS) : 8 * 1048576;
 
-        return max(1048576, min(32 * 1048576, $budget));
+        return max(1048576, min(128 * 1048576, $budget));
     }
 
     /**

@@ -49,6 +49,15 @@ final class ZipPackageWriter implements PackageWriterInterface
         if (!$this->zip->addFile($source_path, $entry_path)) {
             throw new RuntimeException('Unable to add ZIP package file.');
         }
+
+        // Already compressed media gains little from another compression pass.
+        $extension = strtolower(pathinfo($entry_path, PATHINFO_EXTENSION));
+        $method = in_array($extension, array('jpg', 'jpeg', 'png', 'gif', 'webp', 'avif', 'mp3', 'mp4', 'mov', 'm4a', 'woff', 'woff2', 'zip', 'gz', '7z', 'rar'), true)
+            ? ZipArchive::CM_STORE
+            : ZipArchive::CM_DEFLATE;
+        if (!$this->zip->setCompressionName($entry_path, $method, 1)) {
+            throw new RuntimeException('Unable to configure ZIP package compression.');
+        }
     }
 
     public function addString(string $entry_path, string $contents): void

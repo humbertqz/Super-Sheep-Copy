@@ -78,6 +78,23 @@ final class BackupStepRunnerTest extends TestCase
         self::assertSame('database', $job->payload()['backup_bottleneck']);
     }
 
+    public function testDatabaseMetadataIsReusedAcrossRequests(): void
+    {
+        $jobs = new BackupStepRunnerJobRepository();
+        $client = new BackupStepRunnerClient();
+        $job = new Job('backup-123', 'backup', Job::CREATED, $this->payload());
+        for ($step = 0; $step < 4; $step++) {
+            // Each AJAX request creates a fresh runner; cache must live in the job.
+            $runner = $this->runnerWithPackager($jobs, new BackupStepRunnerPackager(), 100, $client);
+            $job = $runner->runStep($job);
+        }
+
+        self::assertSame(Job::SCANNING_FILES, $job->state());
+        self::assertSame(1, $client->row_count_queries);
+        self::assertSame(1, $client->column_queries);
+        self::assertSame(array(), $job->payload()['database_columns']);
+    }
+
     public function testPrimaryKeyExportContinuesPastAnUnderestimatedRowCount(): void
     {
         $jobs = new BackupStepRunnerJobRepository();
@@ -437,6 +454,9 @@ final class BackupStepRunnerJobRepository implements JobRepositoryInterface
 
 class BackupStepRunnerClient implements WpdbClientInterface
 {
+    public int $row_count_queries = 0;
+    public int $column_queries = 0;
+
     public function getTables(): array
     {
         return array('wp_posts');
@@ -454,6 +474,7 @@ class BackupStepRunnerClient implements WpdbClientInterface
 
     public function getRowCount(string $table): int
     {
+        $this->row_count_queries++;
         return 3;
     }
 
@@ -464,6 +485,7 @@ class BackupStepRunnerClient implements WpdbClientInterface
 
     public function getColumns(string $table): array
     {
+        $this->column_queries++;
         return array('ID', 'post_title');
     }
 

@@ -20,7 +20,8 @@ use Throwable;
 
 final class ScheduledBackupRunner
 {
-    private const MAX_STEPS_PER_TICK = 3;
+    private const MAX_STEPS_PER_TICK = 100;
+    private const TICK_BUDGET_SECONDS = 20.0;
     private const MAX_STEP_RETRIES = 3;
 
     private JobRepositoryInterface $jobs;
@@ -107,7 +108,15 @@ final class ScheduledBackupRunner
             return;
         }
 
+        $tick_started = microtime(true);
+        $max_execution_time = (int) ini_get('max_execution_time');
+        $tick_budget = $max_execution_time > 0
+            ? min(self::TICK_BUDGET_SECONDS, $max_execution_time / 2)
+            : self::TICK_BUDGET_SECONDS;
         for ($i = 0; $i < self::MAX_STEPS_PER_TICK; $i++) {
+            if ($i > 0 && microtime(true) - $tick_started >= $tick_budget) {
+                break;
+            }
             $job_id = $job->id();
             try {
                 $owner_token = $this->lock->acquire($job_id);

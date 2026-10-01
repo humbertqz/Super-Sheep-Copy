@@ -78,6 +78,31 @@ final class PackageWriterTest extends TestCase
         $zip->close();
     }
 
+    public function testZipWriterStoresMediaAndCompressesTextAcrossResumedBatches(): void
+    {
+        if (!class_exists(ZipArchive::class)) {
+            self::markTestSkipped('ZipArchive is not available.');
+        }
+
+        $source = str_repeat('backup content ', 1000);
+        file_put_contents($this->root . '/source.txt', $source);
+        $writer = new ZipPackageWriter();
+        $writer->open($this->root . '/package.zip');
+        $writer->addFile($this->root . '/source.txt', 'files/photo.JPG');
+        $writer->close();
+        $writer->open($this->root . '/package.zip');
+        $writer->addFile($this->root . '/source.txt', 'database/chunks/posts.sql');
+        $writer->close();
+
+        $zip = new ZipArchive();
+        self::assertTrue($zip->open($this->root . '/package.zip'));
+        self::assertSame(ZipArchive::CM_STORE, $zip->statName('files/photo.JPG')['comp_method']);
+        self::assertSame(ZipArchive::CM_DEFLATE, $zip->statName('database/chunks/posts.sql')['comp_method']);
+        self::assertSame($source, $zip->getFromName('files/photo.JPG'));
+        self::assertSame($source, $zip->getFromName('database/chunks/posts.sql'));
+        $zip->close();
+    }
+
     public function testTarGzWriterCreatesPackageEntries(): void
     {
         if (!class_exists(PharData::class)) {

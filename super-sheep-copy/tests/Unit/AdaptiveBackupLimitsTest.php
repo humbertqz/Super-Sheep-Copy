@@ -93,9 +93,23 @@ final class AdaptiveBackupLimitsTest extends TestCase
             'archive_last_step_bytes' => 10,
             'archive_last_step_seconds' => 20.0,
         )));
-        self::assertSame(32 * 1048576, $limits->archiveBatchBytes(array(
+        self::assertSame(128 * 1048576, $limits->archiveBatchBytes(array(
             'archive_last_step_bytes' => 8 * 1048576,
             'archive_last_step_seconds' => 0.001,
+        )));
+    }
+
+    public function testFastArchiveStepsCanGrowBeyondOldThirtyTwoMegabyteCap(): void
+    {
+        $limits = new AdaptiveBackupLimits();
+
+        self::assertSame(80 * 1048576, $limits->archiveBatchBytes(array(
+            'archive_last_step_bytes' => 32 * 1048576,
+            'archive_last_step_seconds' => 2.0,
+        )));
+        self::assertSame(8 * 1048576, $limits->archiveBatchBytes(array(
+            'archive_last_step_bytes' => 32 * 1048576,
+            'archive_last_step_seconds' => 20.0,
         )));
     }
 }

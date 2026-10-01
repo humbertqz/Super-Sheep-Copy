@@ -116,16 +116,33 @@ final class ScheduledBackupRunnerTest extends TestCase
         $this->runner($jobs, $step_runner, $lock)->handleContinuationEvent();
 
         self::assertSame(Job::EXPORTING_DATABASE, $jobs->find('backup-scheduled')->state());
-        self::assertSame(3, $step_runner->calls);
+        self::assertSame(100, $step_runner->calls);
         self::assertArrayHasKey('super_sheep_copy_scheduled_backup_continue', $GLOBALS['ssc_test_scheduled_events']);
-        self::assertSame(array(
-            'acquire:backup-scheduled',
-            'release:backup-scheduled:owner-1',
-            'acquire:backup-scheduled',
-            'release:backup-scheduled:owner-2',
-            'acquire:backup-scheduled',
-            'release:backup-scheduled:owner-3',
-        ), $lock->events);
+        self::assertLessThanOrEqual(time() + 5, $GLOBALS['ssc_test_scheduled_events']['super_sheep_copy_scheduled_backup_continue']['timestamp']);
+        self::assertCount(200, $lock->events);
+        for ($step = 0; $step < 100; $step++) {
+            self::assertSame('acquire:backup-scheduled', $lock->events[$step * 2]);
+            self::assertSame('release:backup-scheduled:owner-' . ($step + 1), $lock->events[$step * 2 + 1]);
+        }
+    }
+
+    public function testContinuationYieldsWhenTimeBudgetIsSpent(): void
+    {
+        $previous_limit = ini_get('max_execution_time');
+        ini_set('max_execution_time', '1');
+        try {
+            $job = new Job('backup-scheduled', 'backup', Job::CREATED, array('trigger' => 'scheduled'));
+            $jobs = new ScheduleRunnerJobRepository(array($job));
+            $step_runner = new ScheduleRunnerStepRunner(Job::EXPORTING_DATABASE, 600000);
+
+            $this->runner($jobs, $step_runner)->handleContinuationEvent();
+
+            self::assertSame(1, $step_runner->calls);
+            self::assertSame(Job::EXPORTING_DATABASE, $jobs->find('backup-scheduled')->state());
+            self::assertArrayHasKey('super_sheep_copy_scheduled_backup_continue', $GLOBALS['ssc_test_scheduled_events']);
+        } finally {
+            ini_set('max_execution_time', (string) $previous_limit);
+        }
     }
 
     public function testBusyContinuationReschedulesWithoutExecutingStep(): void
@@ -312,15 +329,20 @@ final class ScheduleRunnerStepRunner implements BackupStepRunnerInterface
     /** @var string[] */
     public array $received_states = array();
     private string $next_state;
+    private int $delay;
 
-    public function __construct(string $next_state = Job::EXPORTING_DATABASE)
+    public function __construct(string $next_state = Job::EXPORTING_DATABASE, int $delay = 0)
     {
         $this->next_state = $next_state;
+        $this->delay = $delay;
     }
 
     public function runStep(Job $job): Job
     {
         $this->calls++;
+        if ($this->delay > 0) {
+            usleep($this->delay);
+        }
         $this->received_states[] = $job->state();
         $payload = $job->payload();
         $payload['updated_at'] = gmdate('c');
