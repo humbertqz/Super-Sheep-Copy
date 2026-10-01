@@ -25,6 +25,7 @@ final class ArchiveWriter
         $writer->addString('manifest.json', $manifest->toJson());
         $writer->addString('checksums.json', (string) json_encode($checksums, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
         $writer->addString('logs/backup.log', $log);
+        ManualRestoreResources::addTo($writer);
 
         foreach ($site_files as $file) {
             if ($file->isSymlink()) {

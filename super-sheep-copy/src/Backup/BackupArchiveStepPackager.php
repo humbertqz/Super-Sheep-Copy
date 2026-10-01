@@ -82,7 +82,7 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
             $absolute_path = isset($entry['absolute_path']) ? (string) $entry['absolute_path'] : '';
             $archive_name = isset($entry['archive_name']) ? (string) $entry['archive_name'] : '';
             if ($absolute_path === '' || $archive_name === '') {
-                continue;
+                throw new RuntimeException('Invalid archive entry. Restart this backup.');
             }
 
             clearstatcache(true, $absolute_path);
@@ -249,10 +249,23 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
         if ($changed_count > 0) {
             $metadata['warnings'][] = $changed_count . ' source file(s) changed after the file scan and were archived in their newer state.';
         }
+        $metadata['skipped_files'] = array(
+            'large_files' => array_values((array) ($payload['skipped_large_files'] ?? array())),
+            'symlinks' => array_values((array) ($payload['skipped_symlinks'] ?? array())),
+        );
+        foreach ($metadata['skipped_files'] as $reason => $files) {
+            if ($files !== array()) {
+                $metadata['warnings'][] = count($files) . ' file(s) omitted: ' . $reason . '. See skipped_files.';
+            }
+        }
+        if (isset($payload['backup_settings']['exclude_cache_files']) && !$payload['backup_settings']['exclude_cache_files']) {
+            $metadata['exclusions'] = array_values(array_diff((array) ($metadata['exclusions'] ?? array()), array('wp-content/cache')));
+        }
 
         $writer->addString('manifest.json', $this->manifest_builder->build($metadata)->toJson());
         $writer->addString('checksums.json', (string) json_encode($checksums, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
         $writer->addString('logs/backup.log', 'Backup ' . $job_id . ' packaged.');
+        ManualRestoreResources::addTo($writer);
         $writer->close();
     }
 
@@ -447,7 +460,9 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
             while (($line = fgets($source)) !== false) {
                 $data = json_decode($line, true);
                 if (!is_array($data)) {
-                    continue;
+                    fclose($source);
+                    fclose($handle);
+                    throw new RuntimeException('Invalid scanned files manifest. Restart this backup.');
                 }
                 $this->writeArchiveEntry($handle, array(
                     'absolute_path' => isset($data['absolute_path']) ? (string) $data['absolute_path'] : '',
@@ -472,7 +487,7 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
     private function writeArchiveEntry($handle, array $entry): void
     {
         $encoded = json_encode($entry, JSON_UNESCAPED_SLASHES);
-        if (!is_string($encoded) || fwrite($handle, $encoded . "\n") === false) {
+        if (!is_string($encoded) || fwrite($handle, $encoded . "\n") !== strlen($encoded) + 1) {
             throw new RuntimeException('Unable to write archive entry.');
         }
     }
@@ -492,9 +507,11 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
         while (($line = fgets($handle)) !== false) {
             $next_offset = ftell($handle);
             $entry = json_decode($line, true);
-            if (is_array($entry)) {
-                $entries[] = array('entry' => $entry, 'next_offset' => $next_offset);
+            if (!is_array($entry) || $next_offset === false) {
+                fclose($handle);
+                throw new RuntimeException('Invalid archive entries manifest. Restart this backup.');
             }
+            $entries[] = array('entry' => $entry, 'next_offset' => $next_offset);
             if (count($entries) >= $limit) {
                 break;
             }
@@ -517,7 +534,7 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
         }
 
         $encoded = json_encode(array('path' => $archive_name, 'checksum' => $checksum), JSON_UNESCAPED_SLASHES);
-        if (!is_string($encoded) || file_put_contents($path, $encoded . "\n", FILE_APPEND) === false) {
+        if (!is_string($encoded) || file_put_contents($path, $encoded . "\n", FILE_APPEND) !== strlen($encoded) + 1) {
             throw new RuntimeException('Unable to append archive checksum.');
         }
     }

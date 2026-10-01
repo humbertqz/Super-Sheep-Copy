@@ -51,6 +51,8 @@ final class ArchiveWriterTest extends TestCase
         self::assertSame('INSERT INTO wp_posts VALUES (1);', $zip->getFromName('database/wp_posts/chunk-000001.sql'));
         self::assertNotFalse($zip->getFromName('manifest.json'));
         self::assertNotFalse($zip->getFromName('checksums.json'));
+        self::assertNotFalse($zip->getFromName('MANUAL-RESTORE.md'));
+        self::assertNotFalse($zip->getFromName('build-database.php'));
         self::assertSame('backup started', $zip->getFromName('logs/backup.log'));
         $zip->close();
 

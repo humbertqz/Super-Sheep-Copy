@@ -177,6 +177,27 @@ final class FileScannerTest extends TestCase
         self::assertNotEmpty($payload['skipped_large_files']);
     }
 
+    public function testScanStepExcludesCustomBackupStorageAndRecordsSymlinks(): void
+    {
+        mkdir($this->root . '/custom-storage/job', 0777, true);
+        file_put_contents($this->root . '/custom-storage/old.zip', 'old backup');
+        symlink($this->root . '/wp-content/uploads', $this->root . '/linked-uploads');
+        $payload = array('working_directory' => $this->root . '/custom-storage/job');
+        $scanner = new FileScanner();
+        do {
+            $payload = $scanner->scanStep($this->root, $payload, 2);
+        } while (!$payload['file_scan_complete']);
+        self::assertSame(array('linked-uploads'), $payload['skipped_symlinks']);
+        self::assertNotContains('custom-storage/old.zip', array_column($payload['scanned_files'], 'relative_path'));
+    }
+
+    public function testMissingDirectoryFailsInsteadOfSilentlySkippingItsContents(): void
+    {
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Unable to scan site directory');
+        (new FileScanner())->scanStep($this->root . '/missing', array());
+    }
+
     private function createWcpdfFiles(): void
     {
         mkdir($this->root . '/wp-content/uploads/wpo_wcpdf_3fd2be178174c22c46a531a81aaee8ce/attachments', 0777, true);

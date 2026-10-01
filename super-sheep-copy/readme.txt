@@ -104,6 +104,12 @@ Large restore packages can be placed in wp-content/uploads/super-sheep-copy/rest
 
 No. The WordPress admin validates backups and prepares restore tooling. Destination changes are performed through the standalone installer after explicit confirmation.
 
+= Can I restore a package without the plugin? =
+
+Yes. Newly created packages include MANUAL-RESTORE.md and a standalone build-database.php tool. Extract the package privately, run php build-database.php to verify the backed-up files and assemble database.sql, import that SQL into an empty MySQL/MariaDB database, and copy the contents of files/ to the WordPress root. Follow the included guide for wp-config.php, domain changes, and verification. No plugin or running WordPress installation is required to assemble or import the database.
+
+Review manifest.json for exclusions, warnings, and omitted large files or symlinks. Pause source-site writes during backup creation for a consistent recovery point. Files outside the WordPress root and custom database triggers, routines, and events require separate backups; views are unsupported.
+
 == Screenshots ==
 
 1. Super Sheep Copy backup admin screen.

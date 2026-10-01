@@ -63,6 +63,13 @@ final class DatabaseBackupCoordinatorTest extends TestCase
 
         self::assertStringContainsString("INSERT INTO `wp_options` (`option_name`, `option_value`) VALUES\n('siteurl', 'https://website.com');", (string) file_get_contents($this->root . '/database/chunks/wp_options.part001.sql'));
         self::assertSame("INSERT INTO `wp_options` (`option_name`, `option_value`) VALUES\n('home', 'https://website.com');\n", file_get_contents($this->root . '/database/chunks/wp_options.part002.sql'));
+        self::assertFileExists($this->root . '/database/chunks/wp_options.part003.sql');
+    }
+
+    public function testOffsetExportContinuesBeyondOriginalRowCount(): void
+    {
+        $this->coordinator(new UnderestimatedOffsetClient())->export($this->root, 'wp_', TableSelector::MODE_PREFIXED, 1);
+        self::assertStringContainsString("('home', 'https://website.com')", (string) file_get_contents($this->root . '/database/chunks/wp_options.part002.sql'));
     }
 
     public function testReportsTableAndChunkProgressMarkers(): void
@@ -93,13 +100,11 @@ final class DatabaseBackupCoordinatorTest extends TestCase
         self::assertSame('Finished exporting table wp_posts', $reports[5]['payload']['message']);
     }
 
-    public function testEmptySelectionWritesEmptyManifest(): void
+    public function testEmptySelectionFailsInsteadOfCreatingAnEmptyBackup(): void
     {
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('No database tables were selected');
         $this->coordinator(new NoTablesFakeClient())->export($this->root, 'wp_', TableSelector::MODE_PREFIXED, 100);
-
-        $manifest = json_decode((string) file_get_contents($this->root . '/database/tables.json'), true);
-        self::assertSame(0, $manifest['table_count']);
-        self::assertSame(array(), $manifest['tables']);
     }
 
     public function testRejectsInvalidChunkSize(): void
@@ -258,7 +263,7 @@ final class EmptyTableFakeClient extends CoordinatorFakeClient
     }
 }
 
-final class OffsetFakeClient extends CoordinatorFakeClient
+class OffsetFakeClient extends CoordinatorFakeClient
 {
     public function getTables(): array
     {
@@ -287,11 +292,22 @@ final class OffsetFakeClient extends CoordinatorFakeClient
 
     public function getRows(string $sql): array
     {
+        if (preg_match('/OFFSET (\d+)/', $sql, $match) === 1 && (int) $match[1] >= 2) {
+            return array();
+        }
         if (strpos($sql, 'OFFSET 1') !== false) {
             return array(array('option_name' => 'home', 'option_value' => 'https://website.com'));
         }
 
         return array(array('option_name' => 'siteurl', 'option_value' => 'https://website.com'));
+    }
+}
+
+final class UnderestimatedOffsetClient extends OffsetFakeClient
+{
+    public function getRowCount(string $table): int
+    {
+        return 1;
     }
 }
 

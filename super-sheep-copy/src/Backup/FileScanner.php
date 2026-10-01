@@ -11,6 +11,7 @@ use SplFileInfo;
 
 final class FileScanner
 {
+    private string $backup_exclusion = '';
     /**
      * @var string[]
      */
@@ -31,9 +32,10 @@ final class FileScanner
     /**
      * @return ScannedFile[]
      */
-    public function scan(string $root): array
+    public function scan(string $root, string $backup_directory = ''): array
     {
         $root = rtrim(str_replace('\\', '/', $root), '/');
+        $this->setBackupExclusion($root, $backup_directory);
         $iterator = new RecursiveIteratorIterator(
             new RecursiveDirectoryIterator($root, RecursiveDirectoryIterator::SKIP_DOTS),
             RecursiveIteratorIterator::SELF_FIRST
@@ -68,6 +70,7 @@ final class FileScanner
     public function scanStep(string $root, array $payload, int $batch_size = 100): array
     {
         $root = rtrim(str_replace('\\', '/', $root), '/');
+        $this->setBackupExclusion($root, isset($payload['working_directory']) ? dirname((string) $payload['working_directory']) : '');
         $batch_size = max(1, $batch_size);
         $settings = isset($payload['backup_settings']) && is_array($payload['backup_settings']) ? $payload['backup_settings'] : array();
         $exclude_cache = !array_key_exists('exclude_cache_files', $settings) || (bool) $settings['exclude_cache_files'];
@@ -125,16 +128,23 @@ final class FileScanner
             }
 
             $absolute = $root . '/' . $relative;
+            if (is_link($absolute)) {
+                $payload['skipped_symlinks'][] = $relative;
+                continue;
+            }
             if (is_dir($absolute) && !is_link($absolute)) {
                 $directories[] = $relative;
                 continue;
             }
 
-            if (!is_file($absolute)) {
-                continue;
+            if (!is_file($absolute) || !is_readable($absolute)) {
+                throw new RuntimeException('Unable to read site file: ' . $relative);
             }
 
-            $size = (int) filesize($absolute);
+            $size = filesize($absolute);
+            if ($size === false) {
+                throw new RuntimeException('Unable to read site file size: ' . $relative);
+            }
             if ($skip_large_files && $size > $large_file_limit_bytes) {
                 if (!isset($payload['skipped_large_files']) || !is_array($payload['skipped_large_files'])) {
                     $payload['skipped_large_files'] = array();
@@ -213,7 +223,7 @@ final class FileScanner
 
     private function writeScannedFilesManifest(string $path, string $contents, int $flags = 0): void
     {
-        if (file_put_contents($path, $contents, $flags) === false) {
+        if (file_put_contents($path, $contents, $flags) !== strlen($contents)) {
             throw new RuntimeException('Unable to write scanned files manifest.');
         }
     }
@@ -237,9 +247,9 @@ final class FileScanner
     private function directoryEntries(string $root, string $relative_directory): array
     {
         $absolute_directory = $relative_directory === '' ? $root : $root . '/' . $relative_directory;
-        $entries = scandir($absolute_directory);
+        $entries = @scandir($absolute_directory);
         if ($entries === false) {
-            return array();
+            throw new RuntimeException('Unable to scan site directory: ' . $relative_directory);
         }
 
         sort($entries);
@@ -260,6 +270,9 @@ final class FileScanner
     private function isExcluded(string $relative, bool $exclude_cache = true): bool
     {
         $relative = trim(str_replace('\\', '/', $relative), '/');
+        if ($this->backup_exclusion !== '' && ($relative === $this->backup_exclusion || strpos($relative, $this->backup_exclusion . '/') === 0)) {
+            return true;
+        }
         $name = basename($relative);
         if (in_array($name, $this->excluded_names, true)) {
             return true;
@@ -280,5 +293,11 @@ final class FileScanner
         }
 
         return false;
+    }
+
+    private function setBackupExclusion(string $root, string $directory): void
+    {
+        $directory = rtrim(str_replace('\\', '/', $directory), '/');
+        $this->backup_exclusion = strpos($directory, $root . '/') === 0 ? substr($directory, strlen($root) + 1) : '';
     }
 }

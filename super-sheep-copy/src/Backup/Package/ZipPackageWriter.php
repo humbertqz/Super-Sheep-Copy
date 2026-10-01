@@ -68,8 +68,11 @@ final class ZipPackageWriter implements PackageWriterInterface
     public function close(): void
     {
         if ($this->zip !== null) {
-            $this->zip->close();
+            $zip = $this->zip;
             $this->zip = null;
+            if (!$zip->close()) {
+                throw new RuntimeException('Unable to finalize ZIP package.');
+            }
         }
     }
 

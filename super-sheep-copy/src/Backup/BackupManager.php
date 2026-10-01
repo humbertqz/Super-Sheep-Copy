@@ -51,7 +51,7 @@ final class BackupManager implements BackupRunnerInterface
 
         $this->save($job_id, Job::SCANNING_FILES, array('working_directory' => $working_directory));
         $this->report($job_id, Job::SCANNING_FILES, 'file_scan_started');
-        $files = $this->files->scan($options->siteRoot());
+        $files = $this->files->scan($options->siteRoot(), $options->workingBaseDirectory());
         $scanned_file_count = count($files);
         $this->report($job_id, Job::SCANNING_FILES, 'file_scan_finished');
 

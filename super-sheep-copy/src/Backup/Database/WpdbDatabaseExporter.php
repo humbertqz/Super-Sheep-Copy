@@ -23,7 +23,11 @@ final class WpdbDatabaseExporter
      */
     public function selectTables(string $prefix, string $mode): array
     {
-        return $this->selector->select($this->client->getTables(), $prefix, $mode);
+        $tables = $this->selector->select($this->client->getTables(), $prefix, $mode);
+        if ($tables === array()) {
+            throw new RuntimeException('No database tables were selected for backup.');
+        }
+        return $tables;
     }
 
     public function getSchema(string $table): TableSchema
@@ -33,6 +37,9 @@ final class WpdbDatabaseExporter
         $create_sql = $this->client->getCreateTableSql($table);
         if ($create_sql === '') {
             throw new RuntimeException('Create table SQL was not found for table: ' . esc_html($table));
+        }
+        if (preg_match('/^CREATE TABLE\b/i', $create_sql) !== 1) {
+            throw new RuntimeException('Unsupported database object (only base tables can be exported): ' . $table);
         }
 
         $status = $this->client->getTableStatus($table);
@@ -76,7 +83,7 @@ final class WpdbDatabaseExporter
         return is_numeric($value) ? (int) $value : null;
     }
 
-    public function buildChunkQuery(ChunkPlan $plan): string
+    public function buildChunkQuery(ChunkPlan $plan, array $columns = array()): string
     {
         $this->assertIdentifier($plan->tableName());
 
@@ -112,8 +119,13 @@ final class WpdbDatabaseExporter
             );
         }
 
+        $order = array();
+        foreach ($columns as $column) {
+            $this->assertIdentifier($column);
+            $order[] = '`' . $column . '`';
+        }
         return $this->client->prepare(
-            sprintf('SELECT * FROM `%s` LIMIT %%d OFFSET %%d', $plan->tableName()),
+            sprintf('SELECT * FROM `%s`%s LIMIT %%d OFFSET %%d', $plan->tableName(), $order === array() ? '' : ' ORDER BY ' . implode(', ', $order)),
             array($plan->limit(), (int) $plan->offset())
         );
     }
@@ -127,7 +139,7 @@ final class WpdbDatabaseExporter
             $this->assertIdentifier($column);
         }
 
-        return new TableRows($plan->tableName(), $columns, $this->client->getRows($this->buildChunkQuery($plan)));
+        return new TableRows($plan->tableName(), $columns, $this->client->getRows($this->buildChunkQuery($plan, $columns)));
     }
 
     private function assertIdentifier(string $identifier): void

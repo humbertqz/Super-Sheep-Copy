@@ -11,6 +11,14 @@ use SuperSheepCopy\Backup\Database\TableSchema;
 
 final class SqlDumpFormatterTest extends TestCase
 {
+    public function testPreservesBinaryValuesWithoutEmbeddingControlBytesInSql(): void
+    {
+        $bytes = "\0\xff'\\\x1a";
+        $sql = (new SqlDumpFormatter())->formatRows(new TableRows('wp_binary', array('data'), array(array('data' => $bytes))));
+        self::assertStringContainsString('(0x' . bin2hex($bytes) . ')', $sql);
+        self::assertStringNotContainsString("\0", $sql);
+    }
+
     public function testFormatsSchemaSql(): void
     {
         $schema = new TableSchema('wp_posts', 'CREATE TABLE `wp_posts` (`ID` bigint)', 'ID', 1, 'utf8mb4', 'utf8mb4_unicode_ci');

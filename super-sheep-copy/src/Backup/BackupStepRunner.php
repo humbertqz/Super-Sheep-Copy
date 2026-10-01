@@ -173,11 +173,8 @@ final class BackupStepRunner implements BackupStepRunnerInterface
             $last_seen_id = $this->lastSeenId($rows->rows(), $schema->primaryKey(), $last_seen_id);
         }
 
-        // InnoDB row counts are estimates. Primary-key pagination has a reliable
-        // cursor, so use the returned batch to avoid silently truncating a live table.
-        $table_complete = $plan->strategy() === ChunkPlan::STRATEGY_PRIMARY_KEY
-            ? $step_rows < $chunk_size
-            : $chunk_number >= $chunk_count;
+        // Counts can change during export; stop only after reading a partial batch.
+        $table_complete = $step_rows < $chunk_size;
 
         if ($table_complete) {
             $payload['database_table_index'] = $table_index + 1;
@@ -278,8 +275,12 @@ final class BackupStepRunner implements BackupStepRunnerInterface
         $payload['backup_completed_at'] = $completed_at;
         $payload['backup_total_seconds'] = max(0, $completed_at - $started_at);
         $changed_count = isset($payload['archive_changed_file_count']) ? (int) $payload['archive_changed_file_count'] : 0;
-        if ($changed_count > 0) {
+        $skipped_count = count((array) ($payload['skipped_large_files'] ?? array())) + count((array) ($payload['skipped_symlinks'] ?? array()));
+        if ($changed_count > 0 || $skipped_count > 0) {
             $payload['message'] = 'Backup completed with warnings: ' . $changed_count . ' source file(s) changed during the backup.';
+            if ($skipped_count > 0) {
+                $payload['message'] .= ' ' . $skipped_count . ' file(s) omitted. See manifest.json.';
+            }
         }
         $completed = $this->save($job_id, Job::COMPLETED, $payload);
         $this->cleanSuccessfulBackupRetention($payload);
@@ -373,7 +374,7 @@ final class BackupStepRunner implements BackupStepRunnerInterface
 
     private function writeFile(string $path, string $contents): void
     {
-        if (file_put_contents($path, $contents) === false) {
+        if (file_put_contents($path, $contents) !== strlen($contents)) {
             throw new RuntimeException('Unable to write file: ' . esc_html($path));
         }
     }

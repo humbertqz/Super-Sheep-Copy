@@ -63,7 +63,7 @@ final class DatabaseExportWriter
 
     private function writeFile(string $path, string $contents): void
     {
-        if (file_put_contents($path, $contents) === false) {
+        if (file_put_contents($path, $contents) !== strlen($contents)) {
             throw new RuntimeException('Unable to write file: ' . esc_html($path));
         }
     }

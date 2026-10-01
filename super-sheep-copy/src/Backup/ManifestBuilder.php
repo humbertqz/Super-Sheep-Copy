@@ -29,6 +29,7 @@ final class ManifestBuilder
             'source_wordpress_version' => (string) $metadata['wordpress_version'],
             'source_php_version' => (string) $metadata['php_version'],
             'source_database_version' => (string) $metadata['database_version'],
+            'source_database_charset' => (string) ($metadata['database_charset'] ?? 'utf8mb4'),
             'source_table_prefix' => (string) $metadata['table_prefix'],
             'is_multisite' => (bool) $metadata['is_multisite'],
             'active_theme' => (string) $metadata['active_theme'],
@@ -44,6 +45,7 @@ final class ManifestBuilder
             'checksums' => (array) $metadata['checksums'],
             'exclusions' => array_values((array) $metadata['exclusions']),
             'warnings' => array_values((array) ($metadata['warnings'] ?? array())),
+            'skipped_files' => (array) ($metadata['skipped_files'] ?? array()),
             'environment' => (array) $metadata['environment'],
         ));
     }

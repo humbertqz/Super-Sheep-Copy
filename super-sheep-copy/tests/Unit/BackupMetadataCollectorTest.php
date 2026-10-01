@@ -46,11 +46,21 @@ final class BackupMetadataCollectorTest extends TestCase
         self::assertSame(array('zip' => array('status' => 'ok')), $metadata['environment']);
         self::assertMatchesRegularExpression('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+00:00$/', $metadata['created_at']);
     }
+
+    public function testMultisiteBackupUsesNetworkTablePrefixAndConnectionCharset(): void
+    {
+        $GLOBALS['wpdb']->prefix = 'wp_2_';
+        $metadata = (new BackupMetadataCollector(new MetadataEnvironmentChecker()))->collect();
+        self::assertSame('wp_', $metadata['table_prefix']);
+        self::assertSame('utf8mb4', $metadata['database_charset']);
+    }
 }
 
 final class MetadataWpdbStub
 {
     public string $prefix = 'wp_';
+    public string $base_prefix = 'wp_';
+    public string $charset = 'utf8mb4';
 
     public function db_version(): string
     {

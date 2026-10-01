@@ -104,6 +104,11 @@ final class SqlDumpFormatter
             return (string) $value;
         }
 
-        return "'" . str_replace(array('\\', "'"), array('\\\\', "\\'"), (string) $value) . "'";
+        $value = (string) $value;
+        // Keep binary data out of SQL text, including NUL bytes rejected by clients.
+        if (preg_match('//u', $value) !== 1 || preg_match('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', $value) === 1) {
+            return '0x' . bin2hex($value);
+        }
+        return "'" . str_replace(array('\\', "'"), array('\\\\', "\\'"), $value) . "'";
     }
 }

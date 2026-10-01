@@ -9,6 +9,52 @@ use SuperSheepCopy\Backup\Database\WpdbClient;
 
 final class WpdbClientTest extends TestCase
 {
+    public function testDoesNotTreatQueryErrorsAsEmptyResults(): void
+    {
+        $wpdb = new class {
+            public string $last_error = '';
+            public function get_results(string $sql, string $output) {
+                $this->last_error = 'SELECT command denied';
+                return null;
+            }
+        };
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Database export query failed: SELECT command denied');
+        (new WpdbClient($wpdb))->getRows('SELECT * FROM `wp_posts`');
+    }
+
+    public function testOnlyUsesSingleSafeIntegerKeysAndSkipsGeneratedColumns(): void
+    {
+        $wpdb = new class {
+            public array $keys = array(array('Column_name' => 'id'));
+            public string $type = 'bigint';
+            public string $maximum = '18446744073709551615';
+            public function get_var(string $sql): string {
+                return $this->maximum;
+            }
+            public function get_results(string $sql, string $output): array {
+                return strpos($sql, 'SHOW KEYS') === 0 ? $this->keys : array(
+                    array('Field' => 'id', 'Type' => $this->type),
+                    array('Field' => 'calculated', 'Extra' => 'STORED GENERATED'),
+                    array('Field' => 'virtual', 'Extra' => 'VIRTUAL GENERATED'),
+                    array('Field' => 'created', 'Extra' => 'DEFAULT_GENERATED'),
+                );
+            }
+        };
+        $client = new WpdbClient($wpdb);
+        self::assertSame('id', $client->getPrimaryKey('wp_custom'));
+        foreach (array('varchar(36)', 'decimal(20,0)', 'bigint unsigned') as $type) {
+            $wpdb->type = $type;
+            self::assertNull($client->getPrimaryKey('wp_custom'));
+        }
+        $wpdb->maximum = '42';
+        self::assertSame('id', $client->getPrimaryKey('wp_custom'));
+        $wpdb->type = 'int';
+        $wpdb->keys[] = array('Column_name' => 'other');
+        self::assertNull($client->getPrimaryKey('wp_custom'));
+        self::assertSame(array('id', 'created'), $client->getColumns('wp_custom'));
+    }
+
     public function testWrapsWpdbOperations(): void
     {
         $wpdb = new FakeWpdb();
@@ -105,7 +151,7 @@ final class FakeWpdb
         }
 
         if ($sql === 'SHOW COLUMNS FROM `wp_posts`') {
-            return array(array('Field' => 'ID'), array('Field' => 'post_title'));
+            return array(array('Field' => 'ID', 'Type' => 'bigint'), array('Field' => 'post_title', 'Type' => 'text'));
         }
 
         if ($sql === 'SHOW COLUMNS FROM `wp-play-large`') {
@@ -147,6 +193,10 @@ final class FakeWpdbWithShowKeysRows
                 'Seq_in_index' => '1',
                 'Column_name' => 'option_id',
             ));
+        }
+
+        if ($sql === 'SHOW COLUMNS FROM `wp_options`') {
+            return array(array('Field' => 'option_id', 'Type' => 'bigint'));
         }
 
         return array();
