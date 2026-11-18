@@ -9,6 +9,8 @@ use SuperSheepCopy\Shared\Archive\ArchiveValidator;
 
 final class ArchiveValidatorTest extends TestCase
 {
+    private const DATABASE_MANIFEST = '{"tables":[{"name":"wp_posts","chunks":["wp_posts.part001.sql"]}]}';
+
     public function testRejectsTraversalPaths(): void
     {
         $validator = new ArchiveValidator();
@@ -39,11 +41,11 @@ final class ArchiveValidatorTest extends TestCase
                 'source_home_url' => 'https://source.example',
             )),
             'checksums.json' => $this->checksums(array(
-                'database/tables.json' => '{}',
+                'database/tables.json' => self::DATABASE_MANIFEST,
                 'database/chunks/wp_posts.part001.sql' => 'CREATE TABLE wp_posts;',
                 'files/index.php' => '<?php echo "site";',
             )),
-            'database/tables.json' => '{}',
+            'database/tables.json' => self::DATABASE_MANIFEST,
             'database/chunks/wp_posts.part001.sql' => 'CREATE TABLE wp_posts;',
             'files/index.php' => '<?php echo "site";',
         ));
@@ -66,11 +68,11 @@ final class ArchiveValidatorTest extends TestCase
         $result = (new ArchiveValidator())->validatePackage($this->createArchive(array(
             'manifest.json' => json_encode(array('project' => 'Super Sheep Copy')),
             'checksums.json' => json_encode(array(
-                'database/tables.json' => hash('sha256', '{}'),
+                'database/tables.json' => hash('sha256', self::DATABASE_MANIFEST),
                 'database/chunks/wp_posts.part001.sql' => hash('sha256', 'CREATE TABLE wp_posts;'),
                 'files/index.php' => hash('sha256', 'original'),
             )),
-            'database/tables.json' => '{}',
+            'database/tables.json' => self::DATABASE_MANIFEST,
             'database/chunks/wp_posts.part001.sql' => 'CREATE TABLE wp_posts;',
             'files/index.php' => 'changed',
         )));
@@ -87,11 +89,11 @@ final class ArchiveValidatorTest extends TestCase
 
         $archive = $this->createArchive(array(
             'checksums.json' => $this->checksums(array(
-                'database/tables.json' => '{}',
+                'database/tables.json' => self::DATABASE_MANIFEST,
                 'database/chunks/wp_posts.part001.sql' => 'CREATE TABLE wp_posts;',
                 'files/index.php' => '<?php echo "site";',
             )),
-            'database/tables.json' => '{}',
+            'database/tables.json' => self::DATABASE_MANIFEST,
         ));
 
         $result = (new ArchiveValidator())->validatePackage($archive);
@@ -109,12 +111,12 @@ final class ArchiveValidatorTest extends TestCase
         $archive = $this->createArchive(array(
             'manifest.json' => json_encode(array('project' => 'Super Sheep Copy')),
             'checksums.json' => $this->checksums(array(
-                'database/tables.json' => '{}',
+                'database/tables.json' => self::DATABASE_MANIFEST,
                 'database/chunks/wp_posts.part001.sql' => 'CREATE TABLE wp_posts;',
                 'files/index.php' => '<?php echo "site";',
             )),
             '../wp-config.php' => 'bad',
-            'database/tables.json' => '{}',
+            'database/tables.json' => self::DATABASE_MANIFEST,
         ));
 
         $result = (new ArchiveValidator())->validatePackage($archive);
@@ -169,7 +171,7 @@ final class ArchiveValidatorTest extends TestCase
         $archive = $this->createArchive(array(
             'manifest.json' => json_encode(array('project' => 'Super Sheep Copy')),
             'checksums.json' => '{}',
-            'database/tables.json' => '{}',
+            'database/tables.json' => self::DATABASE_MANIFEST,
             'files/index.php' => '<?php echo "site";',
         ));
 
@@ -188,7 +190,7 @@ final class ArchiveValidatorTest extends TestCase
         $archive = $this->createArchive(array(
             'manifest.json' => json_encode(array('project' => 'Super Sheep Copy')),
             'checksums.json' => '{}',
-            'database/tables.json' => '{}',
+            'database/tables.json' => self::DATABASE_MANIFEST,
             'database/chunks/wp_posts.part001.sql' => 'CREATE TABLE wp_posts;',
         ));
 
@@ -203,11 +205,11 @@ final class ArchiveValidatorTest extends TestCase
         $package = $this->createDirectoryPackage(array(
             'manifest.json' => json_encode(array('project' => 'Super Sheep Copy')),
             'checksums.json' => $this->checksums(array(
-                'database/tables.json' => '{}',
+                'database/tables.json' => self::DATABASE_MANIFEST,
                 'database/chunks/wp_posts.part001.sql' => 'CREATE TABLE wp_posts;',
                 'files/index.php' => '<?php echo "site";',
             )),
-            'database/tables.json' => '{}',
+            'database/tables.json' => self::DATABASE_MANIFEST,
             'database/chunks/wp_posts.part001.sql' => 'CREATE TABLE wp_posts;',
             'files/index.php' => '<?php echo "site";',
         ));
@@ -229,11 +231,11 @@ final class ArchiveValidatorTest extends TestCase
         $package = $this->createTarGzPackage(array(
             'manifest.json' => json_encode(array('project' => 'Super Sheep Copy')),
             'checksums.json' => $this->checksums(array(
-                'database/tables.json' => '{}',
+                'database/tables.json' => self::DATABASE_MANIFEST,
                 'database/chunks/wp_posts.part001.sql' => 'CREATE TABLE wp_posts;',
                 'files/index.php' => '<?php echo "site";',
             )),
-            'database/tables.json' => '{}',
+            'database/tables.json' => self::DATABASE_MANIFEST,
             'database/chunks/wp_posts.part001.sql' => 'CREATE TABLE wp_posts;',
             'files/index.php' => '<?php echo "site";',
         ));

@@ -78,13 +78,18 @@ final class FileScanner
         $large_file_limit_mb = isset($settings['large_file_limit_mb']) && is_numeric($settings['large_file_limit_mb']) ? (int) $settings['large_file_limit_mb'] : 250;
         $large_file_limit_bytes = max(0, $large_file_limit_mb) * 1024 * 1024;
 
-        if (!isset($payload['file_scan_directories']) || !is_array($payload['file_scan_directories'])) {
+        $scanned_files_path = $this->scannedFilesPath($payload);
+        if (!isset($payload['file_scan_directories']) || !is_array($payload['file_scan_directories'])
+            || !array_key_exists('file_scan_last_entry', $payload)
+            || ($scanned_files_path !== '' && !isset($payload['scanned_files_offset']))) {
             $payload['file_scan_directories'] = array('');
             $payload['file_scan_current_directory'] = null;
-            $payload['file_scan_current_index'] = 0;
+            $payload['file_scan_last_entry'] = null;
             $payload['scanned_file_count'] = 0;
-            if ($this->scannedFilesPath($payload) !== '') {
-                $this->writeScannedFilesManifest($this->scannedFilesPath($payload), '');
+            unset($payload['skipped_large_files'], $payload['skipped_large_file_count'], $payload['skipped_symlinks']);
+            if ($scanned_files_path !== '') {
+                $this->writeScannedFilesManifest($scanned_files_path, '');
+                $payload['scanned_files_offset'] = 0;
                 unset($payload['scanned_files']);
             } else {
                 $payload['scanned_files'] = array();
@@ -93,14 +98,14 @@ final class FileScanner
 
         $directories = array_values($payload['file_scan_directories']);
         $current_directory = isset($payload['file_scan_current_directory']) && $payload['file_scan_current_directory'] !== null ? (string) $payload['file_scan_current_directory'] : null;
-        $current_index = isset($payload['file_scan_current_index']) ? (int) $payload['file_scan_current_index'] : 0;
-        $scanned_files_path = $this->scannedFilesPath($payload);
+        $last_entry = $payload['file_scan_last_entry'];
+        $manifest_offset = (int) ($payload['scanned_files_offset'] ?? 0);
+        if ($scanned_files_path !== '') {
+            $this->restoreManifestCheckpoint($scanned_files_path, $manifest_offset);
+        }
         $files = $scanned_files_path === '' && isset($payload['scanned_files']) && is_array($payload['scanned_files']) ? $payload['scanned_files'] : array();
         $scanned_file_count = isset($payload['scanned_file_count']) ? (int) $payload['scanned_file_count'] : count($files);
         $processed = 0;
-        $current_directory_entries_for = null;
-        $current_directory_entries = array();
-
         while ($processed < $batch_size) {
             if ($current_directory === null) {
                 if ($directories === array()) {
@@ -108,72 +113,69 @@ final class FileScanner
                 }
 
                 $current_directory = (string) array_shift($directories);
-                $current_index = 0;
+                $last_entry = null;
             }
 
-            $entries = $this->cachedDirectoryEntries($root, $current_directory, $current_directory_entries_for, $current_directory_entries);
-            if (!isset($entries[$current_index])) {
-                $current_directory = null;
-                $current_index = 0;
-                continue;
-            }
+            $entries = $this->directoryEntries($root, $current_directory);
+            $current_index = $this->nextEntryIndex($entries, $last_entry);
+            while ($processed < $batch_size && isset($entries[$current_index])) {
+                $entry = $entries[$current_index++];
+                $last_entry = $entry;
+                $processed++;
 
-            $entry = (string) $entries[$current_index];
-            $current_index++;
-            $processed++;
-
-            $relative = trim($current_directory . '/' . $entry, '/');
-            if ($this->isExcluded($relative, $exclude_cache)) {
-                continue;
-            }
-
-            $absolute = $root . '/' . $relative;
-            if (is_link($absolute)) {
-                $payload['skipped_symlinks'][] = $relative;
-                continue;
-            }
-            if (is_dir($absolute) && !is_link($absolute)) {
-                $directories[] = $relative;
-                continue;
-            }
-
-            if (!is_file($absolute) || !is_readable($absolute)) {
-                throw new RuntimeException('Unable to read site file: ' . $relative);
-            }
-
-            $size = filesize($absolute);
-            if ($size === false) {
-                throw new RuntimeException('Unable to read site file size: ' . $relative);
-            }
-            if ($skip_large_files && $size > $large_file_limit_bytes) {
-                if (!isset($payload['skipped_large_files']) || !is_array($payload['skipped_large_files'])) {
-                    $payload['skipped_large_files'] = array();
+                $relative = trim($current_directory . '/' . $entry, '/');
+                if ($this->isExcluded($relative, $exclude_cache)) {
+                    continue;
                 }
-                $payload['skipped_large_files'][] = array(
+
+                $absolute = $root . '/' . $relative;
+                if (is_link($absolute)) {
+                    $payload['skipped_symlinks'][] = $relative;
+                    continue;
+                }
+                if (is_dir($absolute) && !is_link($absolute)) {
+                    $directories[] = $relative;
+                    continue;
+                }
+
+                if (!is_file($absolute) || !is_readable($absolute)) {
+                    throw new RuntimeException('Unable to read site file: ' . $relative);
+                }
+
+                $size = filesize($absolute);
+                if ($size === false) {
+                    throw new RuntimeException('Unable to read site file size: ' . $relative);
+                }
+                if ($skip_large_files && $size > $large_file_limit_bytes) {
+                    if (!isset($payload['skipped_large_files']) || !is_array($payload['skipped_large_files'])) {
+                        $payload['skipped_large_files'] = array();
+                    }
+                    $payload['skipped_large_files'][] = array(
+                        'relative_path' => str_replace('\\', '/', $relative),
+                        'size' => $size,
+                    );
+                    $payload['skipped_large_file_count'] = count($payload['skipped_large_files']);
+                    continue;
+                }
+
+                $file = array(
+                    'absolute_path' => str_replace('\\', '/', $absolute),
                     'relative_path' => str_replace('\\', '/', $relative),
                     'size' => $size,
+                    'symlink' => is_link($absolute),
                 );
-                $payload['skipped_large_file_count'] = count($payload['skipped_large_files']);
-                continue;
+                if ($scanned_files_path !== '') {
+                    $manifest_offset += $this->appendScannedFile($scanned_files_path, $file);
+                } else {
+                    $files[] = $file;
+                }
+                $scanned_file_count++;
             }
 
-            $file = array(
-                'absolute_path' => str_replace('\\', '/', $absolute),
-                'relative_path' => str_replace('\\', '/', $relative),
-                'size' => $size,
-                'symlink' => is_link($absolute),
-            );
-            if ($scanned_files_path !== '') {
-                $this->appendScannedFile($scanned_files_path, $file);
-            } else {
-                $files[] = $file;
+            if ($current_index >= count($entries)) {
+                $current_directory = null;
+                $last_entry = null;
             }
-            $scanned_file_count++;
-        }
-
-        if ($current_directory !== null && $current_index >= count($this->cachedDirectoryEntries($root, $current_directory, $current_directory_entries_for, $current_directory_entries))) {
-            $current_directory = null;
-            $current_index = 0;
         }
 
         $complete = $directories === array() && $current_directory === null;
@@ -185,11 +187,13 @@ final class FileScanner
 
         $payload['file_scan_directories'] = $directories;
         $payload['file_scan_current_directory'] = $current_directory;
-        $payload['file_scan_current_index'] = $current_index;
+        $payload['file_scan_last_entry'] = $last_entry;
+        unset($payload['file_scan_current_index']);
         if ($scanned_files_path === '') {
             $payload['scanned_files'] = $files;
         } else {
             unset($payload['scanned_files']);
+            $payload['scanned_files_offset'] = $manifest_offset;
         }
         $payload['scanned_file_count'] = $scanned_file_count;
         $payload['file_scan_complete'] = $complete;
@@ -211,14 +215,16 @@ final class FileScanner
     /**
      * @param array<string,mixed> $file
      */
-    private function appendScannedFile(string $path, array $file): void
+    private function appendScannedFile(string $path, array $file): int
     {
         $encoded = json_encode($file, JSON_UNESCAPED_SLASHES);
         if (!is_string($encoded)) {
             throw new RuntimeException('Unable to encode scanned file entry.');
         }
 
-        $this->writeScannedFilesManifest($path, $encoded . "\n", FILE_APPEND);
+        $line = $encoded . "\n";
+        $this->writeScannedFilesManifest($path, $line, FILE_APPEND);
+        return strlen($line);
     }
 
     private function writeScannedFilesManifest(string $path, string $contents, int $flags = 0): void
@@ -228,17 +234,48 @@ final class FileScanner
         }
     }
 
-    /**
-     * @return string[]
-     */
-    private function cachedDirectoryEntries(string $root, string $relative_directory, ?string &$cached_directory, array &$cached_entries): array
+    private function restoreManifestCheckpoint(string $path, int $offset): void
     {
-        if ($cached_directory !== $relative_directory) {
-            $cached_directory = $relative_directory;
-            $cached_entries = $this->directoryEntries($root, $relative_directory);
+        clearstatcache(true, $path);
+        $size = is_file($path) ? filesize($path) : false;
+        if ($size === false || $offset < 0 || $size < $offset) {
+            throw new RuntimeException('Scanned files manifest is missing or incomplete. Restart this backup.');
+        }
+        if ($size === $offset) {
+            return;
         }
 
-        return $cached_entries;
+        $handle = fopen($path, 'r+b');
+        if ($handle === false) {
+            throw new RuntimeException('Unable to open scanned files manifest.');
+        }
+        try {
+            if (!ftruncate($handle, $offset)) {
+                throw new RuntimeException('Unable to restore scanned files manifest to its saved position.');
+            }
+        } finally {
+            fclose($handle);
+        }
+    }
+
+    /** @param string[] $entries */
+    private function nextEntryIndex(array $entries, ?string $last_entry): int
+    {
+        if ($last_entry === null) {
+            return 0;
+        }
+
+        $first = 0;
+        $end = count($entries);
+        while ($first < $end) {
+            $middle = intdiv($first + $end, 2);
+            if (strcmp($entries[$middle], $last_entry) <= 0) {
+                $first = $middle + 1;
+            } else {
+                $end = $middle;
+            }
+        }
+        return $first;
     }
 
     /**
@@ -252,7 +289,7 @@ final class FileScanner
             throw new RuntimeException('Unable to scan site directory: ' . $relative_directory);
         }
 
-        sort($entries);
+        sort($entries, SORT_STRING);
 
         return array_values(array_filter($entries, static function (string $entry): bool {
             return $entry !== '.' && $entry !== '..';

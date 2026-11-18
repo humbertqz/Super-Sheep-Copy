@@ -41,30 +41,25 @@ final class SqlDumpFormatter
         );
         $statements = array();
         $values = array();
+        $statement_bytes = strlen($prefix) + strlen(";\n");
         foreach ($rows->rows() as $row) {
             $formatted = array();
             foreach ($rows->columns() as $column) {
                 $formatted[] = $this->formatValue($row[$column]);
             }
             $value = '(' . implode(', ', $formatted) . ')';
-            $candidate_values = $values;
-            $candidate_values[] = $value;
-            $candidate = $this->formatInsertStatement($prefix, $candidate_values);
+            $value_bytes = strlen($value);
 
-            if (strlen($candidate) <= $this->max_insert_bytes) {
-                $values = $candidate_values;
-                continue;
+            if ($values !== array() && $statement_bytes + 2 + $value_bytes > $this->max_insert_bytes) {
+                $statements[] = $this->formatInsertStatement($prefix, $values);
+                $values = array();
+                $statement_bytes = strlen($prefix) + strlen(";\n");
             }
-
-            if ($values === array()) {
+            $statement_bytes += $value_bytes + ($values === array() ? 0 : 2);
+            if ($statement_bytes > $this->max_insert_bytes) {
                 throw new \InvalidArgumentException('Single row for table ' . $rows->tableName() . ' exceeds the maximum INSERT statement size.');
             }
-
-            $statements[] = $this->formatInsertStatement($prefix, $values);
-            $values = array($value);
-            if (strlen($this->formatInsertStatement($prefix, $values)) > $this->max_insert_bytes) {
-                throw new \InvalidArgumentException('Single row for table ' . $rows->tableName() . ' exceeds the maximum INSERT statement size.');
-            }
+            $values[] = $value;
         }
 
         if ($values !== array()) {

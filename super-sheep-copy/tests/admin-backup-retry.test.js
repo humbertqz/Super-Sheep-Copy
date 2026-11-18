@@ -83,7 +83,16 @@ async function harness(responses, retry = false) {
     assert.equal(paused.requests.length, 7);
     assert.equal(paused.attributes['data-super-sheep-copy-job-state'], 'packaging_archive');
     assert.match(paused.progress.textContent, /Use Retry/);
+    assert.match(paused.progress.textContent, /PHP error log/);
     assert.equal(paused.button.style.display, '');
+
+    const critical = '<p>Ha habido un error crítico en esta web.</p><p><a href="#">Más información</a></p>';
+    const fragment = await harness([{ status: 200, text: critical }, completed]);
+    assert.match(fragment.progress.textContent, /Retrying backup/);
+    assert.ok(!fragment.progress.textContent.includes('<p>'));
+    fragment.timers.shift().callback();
+    await fragment.settle();
+    assert.equal(fragment.state.textContent, 'completed');
 
     const retry = await harness([new Error('Failed to fetch'), completed], true);
     retry.timers.shift().callback();

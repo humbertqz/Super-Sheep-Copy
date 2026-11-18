@@ -107,6 +107,10 @@ final class PackageValidator
             $errors = array_merge($errors, $this->validateChecksums($reader, $content_entries));
         }
 
+        if ($has_database_tables) {
+            $errors = array_merge($errors, DatabaseManifestValidator::errors($reader, $content_entries));
+        }
+
         return new ArchiveValidationResult($errors === array(), $errors, $manifest, $entry_count, $database_entry_count);
     }
 

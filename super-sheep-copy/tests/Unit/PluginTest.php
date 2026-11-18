@@ -7,6 +7,8 @@ namespace SuperSheepCopy\Tests\Unit;
 use PHPUnit\Framework\TestCase;
 use ReflectionProperty;
 use SuperSheepCopy\Plugin;
+use SuperSheepCopy\Jobs\Job;
+use SuperSheepCopy\Jobs\OptionJobRepository;
 use SuperSheepCopy\Schedule\ScheduleEventScheduler;
 use SuperSheepCopy\Schedule\ScheduleSettingsRepository;
 use SuperSheepCopy\Settings\BackupSettingsRepository;
@@ -16,6 +18,7 @@ final class PluginTest extends TestCase
     protected function setUp(): void
     {
         $GLOBALS['ssc_test_options'] = array();
+        $GLOBALS['wpdb'] = new \SscTestJobOptionsWpdb();
         $GLOBALS['ssc_test_scheduled_events'] = array(
             ScheduleEventScheduler::DUE_HOOK => array('timestamp' => 100, 'hook' => ScheduleEventScheduler::DUE_HOOK, 'args' => array()),
             ScheduleEventScheduler::CONTINUE_HOOK => array('timestamp' => 200, 'hook' => ScheduleEventScheduler::CONTINUE_HOOK, 'args' => array()),
@@ -36,7 +39,6 @@ final class PluginTest extends TestCase
     public function testBootSharesBackupExecutionLockBetweenCronAndAjax(): void
     {
         $GLOBALS['ssc_test_actions'] = array();
-        $GLOBALS['wpdb'] = new \stdClass();
 
         Plugin::instance()->boot();
 
@@ -54,12 +56,15 @@ final class PluginTest extends TestCase
         update_option(BackupSettingsRepository::OPTION_NAME, array('retention_count' => 3));
         update_option(ScheduleSettingsRepository::OPTION_NAME, array('enabled' => true));
         update_option('unrelated_option', 'keep');
+        $jobs = new OptionJobRepository();
+        $jobs->save(new Job('new-backup', 'backup', Job::COMPLETED));
 
         Plugin::uninstall();
 
         self::assertArrayNotHasKey(ScheduleEventScheduler::DUE_HOOK, $GLOBALS['ssc_test_scheduled_events']);
         self::assertArrayNotHasKey(ScheduleEventScheduler::CONTINUE_HOOK, $GLOBALS['ssc_test_scheduled_events']);
         self::assertArrayNotHasKey('super_sheep_copy_jobs', $GLOBALS['ssc_test_options']);
+        self::assertNull($jobs->find('new-backup'));
         self::assertArrayNotHasKey(BackupSettingsRepository::OPTION_NAME, $GLOBALS['ssc_test_options']);
         self::assertArrayNotHasKey(ScheduleSettingsRepository::OPTION_NAME, $GLOBALS['ssc_test_options']);
         self::assertSame('keep', $GLOBALS['ssc_test_options']['unrelated_option']);

@@ -145,10 +145,6 @@
         try {
             payload = JSON.parse(text);
         } catch (error) {
-            if (/<!doctype html|<html[\s>]/i.test(text)) {
-                return 'Backup step endpoint returned an HTML error page.';
-            }
-
             return text ? text.slice(0, 500) : '';
         }
 
@@ -171,6 +167,7 @@
         var message = error && error.message ? error.message : '';
 
         return [408, 429, 500, 502, 503, 504].indexOf(error && error.status) !== -1
+            || (error && error.status === 200 && error.htmlResponse)
             || message.indexOf('Request Timeout') !== -1
             || message.indexOf('HTTP 500') !== -1
             || message.indexOf('Failed to fetch') !== -1
@@ -218,10 +215,14 @@
             body: body.toString()
         }).then(function (response) {
             return response.text().then(function (text) {
-                if (!response.ok) {
-                    var message = backupErrorMessage(text);
+                var htmlResponse = /^\s*<(?:!doctype\b|[a-z][a-z0-9-]*(?:\s|>))/i.test(text);
+                if (!response.ok || htmlResponse) {
+                    var message = htmlResponse
+                        ? 'WordPress returned an error page. Check the PHP error log for this backup.'
+                        : backupErrorMessage(text);
                     var requestError = new Error('Backup step request failed with HTTP ' + response.status + '.' + (message ? ' ' + message : ''));
                     requestError.status = response.status;
+                    requestError.htmlResponse = htmlResponse;
                     throw requestError;
                 }
 
@@ -256,7 +257,9 @@
         }).catch(function (error) {
             if (isTransientStepError(error)) {
                 if (failures >= 6) {
-                    showProgressMessage(row, 'The server is still unavailable. Use Retry / Continue backup to resume.');
+                    showProgressMessage(row, error.htmlResponse
+                        ? error.message + ' Use Retry / Continue backup to resume.'
+                        : 'The server is still unavailable. Use Retry / Continue backup to resume.');
                     showRetry(row);
                     return;
                 }

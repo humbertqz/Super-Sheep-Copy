@@ -161,9 +161,9 @@ final class Plugin
 
     private static function deletePluginOptions(): void
     {
+        (new OptionJobRepository())->deleteAll();
         foreach (
             array(
-                'super_sheep_copy_jobs',
                 BackupSettingsRepository::OPTION_NAME,
                 ScheduleSettingsRepository::OPTION_NAME,
             ) as $option

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace SuperSheepCopy\Backup;
 
 use RuntimeException;
+use SuperSheepCopy\Shared\Archive\DatabaseManifestValidator;
 use SuperSheepCopy\Shared\Archive\PackageReaderFactory;
 use SuperSheepCopy\Shared\Archive\PackageReaderInterface;
 
@@ -37,6 +38,14 @@ final class IncrementalArchiveValidator
 
         if ($content_entries === array()) {
             $payload['validation_errors'][] = 'No backup content entries were found.';
+        }
+        if (isset($payload['scanned_files_path'], $payload['archive_site_file_count'])) {
+            $file_count = count(array_filter($content_entries, static function (string $entry): bool {
+                return strpos($entry, 'files/') === 0;
+            }));
+            if ($file_count !== (int) $payload['archive_site_file_count']) {
+                $payload['validation_errors'][] = 'Packaged files do not match the scanned file count.';
+            }
         }
 
         $required = array('manifest.json', 'checksums.json', 'database/tables.json');
@@ -108,6 +117,15 @@ final class IncrementalArchiveValidator
 
         if ($payload['validation_complete']) {
             $entry_lookup = array_fill_keys($entries, true);
+            if (count($entry_lookup) !== count($entries)) {
+                $payload['validation_errors'][] = 'Duplicate backup content entries were found.';
+            }
+            if (isset($entry_lookup['database/tables.json'])) {
+                $payload['validation_errors'] = array_merge(
+                    $payload['validation_errors'],
+                    DatabaseManifestValidator::errors($reader, $entries)
+                );
+            }
             foreach ($checksums as $entry => $checksum) {
                 if (!is_string($entry) || !isset($entry_lookup[$entry])) {
                     $payload['validation_errors'][] = 'Unexpected checksum for archive entry: ' . (string) $entry;

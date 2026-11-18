@@ -15,6 +15,8 @@ use ZipArchive;
 
 final class RestorePreparationManagerTest extends TestCase
 {
+    private const DATABASE_MANIFEST = '{"tables":[{"name":"wp_posts","chunks":["wp_posts.part001.sql"]}]}';
+
     private string $root;
 
     protected function setUp(): void
@@ -145,7 +147,7 @@ final class RestorePreparationManagerTest extends TestCase
             'must_use_plugins' => array('mu-loader.php'),
             'source_table_prefix' => 'wp_',
         )));
-        $zip->addFromString('database/tables.json', '{}');
+        $zip->addFromString('database/tables.json', self::DATABASE_MANIFEST);
         $zip->addFromString('database/chunks/wp_posts.part001.sql', 'CREATE TABLE wp_posts;');
         $zip->addFromString('files/index.php', '<?php echo "site";');
         $zip->addFromString('checksums.json', $this->checksumManifest());
@@ -201,7 +203,7 @@ final class RestorePreparationManagerTest extends TestCase
                 'source_table_prefix' => 'wp_',
             )),
             'checksums.json' => $this->checksumManifest(),
-            'database/tables.json' => '{}',
+            'database/tables.json' => self::DATABASE_MANIFEST,
             'database/chunks/wp_posts.part001.sql' => 'CREATE TABLE wp_posts;',
             'files/index.php' => '<?php echo "site";',
         );
@@ -210,7 +212,7 @@ final class RestorePreparationManagerTest extends TestCase
     private function checksumManifest(): string
     {
         return (string) json_encode(array(
-            'database/tables.json' => hash('sha256', '{}'),
+            'database/tables.json' => hash('sha256', self::DATABASE_MANIFEST),
             'database/chunks/wp_posts.part001.sql' => hash('sha256', 'CREATE TABLE wp_posts;'),
             'files/index.php' => hash('sha256', '<?php echo "site";'),
         ));

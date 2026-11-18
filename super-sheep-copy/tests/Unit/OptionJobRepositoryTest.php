@@ -14,6 +14,7 @@ final class OptionJobRepositoryTest extends TestCase
     {
         $GLOBALS['ssc_test_options'] = array();
         $GLOBALS['ssc_test_cache_deletes'] = array();
+        $GLOBALS['wpdb'] = new \SscTestJobOptionsWpdb();
     }
 
     public function testDeletesJobById(): void
@@ -40,5 +41,41 @@ final class OptionJobRepositoryTest extends TestCase
         self::assertSame(array(
             array('super_sheep_copy_jobs', 'options'),
         ), $GLOBALS['ssc_test_cache_deletes']);
+    }
+
+    public function testLegacyJobsCanBeReadUpdatedAndDeletedIndependently(): void
+    {
+        $backup = new Job('legacy-backup', 'backup');
+        $restore = new Job('legacy-restore', 'restore', Job::COMPLETED);
+        $legacy = array($backup->id() => $backup->toArray(), $restore->id() => $restore->toArray());
+        update_option('super_sheep_copy_jobs', $legacy);
+
+        $repository = new OptionJobRepository();
+        self::assertSame(Job::CREATED, $repository->find($backup->id())->state());
+        $repository->save(new Job($backup->id(), 'backup', Job::EXPORTING_DATABASE));
+        $repository->delete($restore->id());
+
+        $fresh_repository = new OptionJobRepository();
+        self::assertSame(Job::EXPORTING_DATABASE, $fresh_repository->find($backup->id())->state());
+        self::assertNull($fresh_repository->find($restore->id()));
+        self::assertCount(1, $fresh_repository->all());
+        self::assertSame($legacy, get_option('super_sheep_copy_jobs'));
+    }
+
+    public function testFailedWriteIsReportedWhenCheckpointDidNotChange(): void
+    {
+        $repository = new OptionJobRepository();
+        $job = new Job('backup-123', 'backup');
+        $repository->save($job);
+
+        $GLOBALS['ssc_test_reject_job_updates'] = true;
+        try {
+            $repository->save($job);
+            $this->expectExceptionMessage('Unable to save the job state.');
+            $repository->save(new Job($job->id(), 'backup', Job::SCANNING_FILES));
+        } finally {
+            unset($GLOBALS['ssc_test_reject_job_updates']);
+            self::assertSame(Job::CREATED, $repository->find($job->id())->state());
+        }
     }
 }

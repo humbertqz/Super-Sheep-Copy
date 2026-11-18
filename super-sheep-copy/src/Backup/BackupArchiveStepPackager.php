@@ -51,6 +51,7 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
         }
         $archive_path = isset($payload['archive_path']) ? (string) $payload['archive_path'] : '';
         $index = isset($payload['archive_index']) ? (int) $payload['archive_index'] : 0;
+        $total_entries = (int) ($payload['archive_entry_count'] ?? 0);
         if (!isset($payload['archive_entries_offset']) && $index > 0) {
             throw new RuntimeException('Restart this backup to use offset-based streaming packaging.');
         }
@@ -73,6 +74,9 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
         $effective_batch_size = $this->effectiveBatchSize($payload);
         $payload['archive_effective_batch_size'] = $effective_batch_size;
         $entries = $this->readArchiveEntriesBatch($this->archiveEntriesPath($payload), $offset, $effective_batch_size);
+        if ($entries === array() && $index < $total_entries) {
+            throw new RuntimeException('Archive entries manifest ended before all files were packaged. Restart this backup.');
+        }
         foreach ($entries as $item) {
             $entry = $item['entry'];
             $entry_bytes = isset($entry['size']) && is_numeric($entry['size']) ? max(0, (int) $entry['size']) : 0;
@@ -92,6 +96,9 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
             }
 
             clearstatcache(true, $absolute_path);
+            if (is_link($absolute_path) || !is_file($absolute_path) || !is_readable($absolute_path)) {
+                throw new RuntimeException('Backup source disappeared or is no longer readable: ' . $archive_name);
+            }
             $current_size = filesize($absolute_path);
             $scanned_size = isset($entry['size']) && is_numeric($entry['size']) ? (int) $entry['size'] : null;
             if (strpos($archive_name, 'files/') === 0 && $current_size !== false && $scanned_size !== null && (int) $current_size !== $scanned_size) {
@@ -119,7 +126,6 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
 
         $payload['archive_index'] = $index;
         $payload['archive_entries_offset'] = $offset;
-        $total_entries = isset($payload['archive_entry_count']) ? (int) $payload['archive_entry_count'] : 0;
         $payload = $this->addProgressMetrics($payload, $total_entries, $step_start_index, $step_start_time, $step_bytes);
 
         if ($index >= $total_entries) {
@@ -485,6 +491,7 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
                 fclose($handle);
                 throw new RuntimeException('Missing scanned files manifest. Restart this backup to use streaming packaging.');
             }
+            $scanned_count = 0;
             while (($line = fgets($source)) !== false) {
                 $data = json_decode($line, true);
                 if (!is_array($data)) {
@@ -498,8 +505,13 @@ final class BackupArchiveStepPackager implements BackupArchiveStepPackagerInterf
                     'size' => isset($data['size']) ? (int) $data['size'] : 0,
                     'symlink' => !empty($data['symlink']),
                 ));
+                $scanned_count++;
             }
             fclose($source);
+            if ($scanned_count !== (int) ($payload['scanned_file_count'] ?? 0)) {
+                fclose($handle);
+                throw new RuntimeException('Scanned files manifest does not match the saved file count. Restart this backup.');
+            }
         } else {
             foreach ($site_files as $file) {
                 $this->writeArchiveEntry($handle, $this->entryForFile('files', $file));

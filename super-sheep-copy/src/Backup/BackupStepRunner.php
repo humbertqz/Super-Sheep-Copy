@@ -14,6 +14,7 @@ use SuperSheepCopy\Backup\Database\TableSchema;
 use SuperSheepCopy\Backup\Database\WpdbDatabaseExporter;
 use SuperSheepCopy\Jobs\Job;
 use SuperSheepCopy\Jobs\JobRepositoryInterface;
+use SuperSheepCopy\Support\ErrorLogLogger;
 use Throwable;
 
 final class BackupStepRunner implements BackupStepRunnerInterface
@@ -28,6 +29,10 @@ final class BackupStepRunner implements BackupStepRunnerInterface
     private int $file_scan_batch_size;
     private AdaptiveBackupLimits $adaptive_limits;
     private IncrementalArchiveValidator $archive_validator;
+    private bool $database_diagnostics_registered = false;
+    /** @var array<string,mixed>|null */
+    private ?array $database_attempt_context = null;
+    private string $database_error_reserve = '';
 
     public function __construct(
         JobRepositoryInterface $jobs,
@@ -80,8 +85,12 @@ final class BackupStepRunner implements BackupStepRunnerInterface
             $payload['message'] = 'Backup failed: ' . $throwable->getMessage();
             $payload['error'] = $throwable->getMessage();
             $payload['failed_state'] = $job->state();
+            unset($payload['database_attempt_limit']);
 
             return $this->save($job->id(), Job::FAILED, $payload);
+        } finally {
+            $this->database_attempt_context = null;
+            $this->database_error_reserve = '';
         }
     }
 
@@ -131,17 +140,26 @@ final class BackupStepRunner implements BackupStepRunnerInterface
 
         $step_start = microtime(true);
         $table = (string) $tables[$table_index];
+        $chunk_number = (int) ($payload['database_chunk_number'] ?? 1);
+        if ((int) ($payload['database_attempt_limit'] ?? 0) === 1) {
+            throw new RuntimeException('PHP stopped while exporting a single row from table ' . $table . '. Check the PHP error log for this backup.');
+        }
+        $chunk_size = $this->adaptive_limits->databaseChunkSize($payload, $chunk_number === 1);
+        if (isset($payload['database_attempt_limit'])) {
+            $payload['database_retry_ceiling'] = $chunk_size;
+        }
+        $payload['database_attempt_limit'] = $chunk_size;
+        $payload['message'] = sprintf('Exporting table %s (chunk %d, up to %d rows).', $table, $chunk_number, $chunk_size);
+        $this->trackDatabaseAttempt($job->id(), $table, $chunk_number, $chunk_size);
+        $this->save($job->id(), Job::EXPORTING_DATABASE, $payload);
+
         $schema = isset($payload['database_schemas'][$table])
             ? $this->schemaFromArray($payload['database_schemas'][$table])
             : $this->database->getSchema($table);
         $columns = $payload['database_columns'][$table] ?? $this->database->getColumns($table);
         $payload['database_columns'][$table] = $columns;
-        $chunk_size = $schema->primaryKey() !== null && $schema->primaryKey() !== ''
-            ? $this->adaptive_limits->databaseChunkSize($payload)
-            : (int) $this->intPayload($payload, 'database_chunk_size');
         $payload['database_adaptive_chunk_size'] = $chunk_size;
         $chunk_count = max(1, (int) ceil($schema->rowCount() / $chunk_size));
-        $chunk_number = isset($payload['database_chunk_number']) ? (int) $payload['database_chunk_number'] : 1;
         $last_seen_id = isset($payload['database_last_seen_id']) && $payload['database_last_seen_id'] !== null ? (int) $payload['database_last_seen_id'] : null;
         if (!isset($payload['database_primary_key_upper_bounds']) || !is_array($payload['database_primary_key_upper_bounds'])) {
             $payload['database_primary_key_upper_bounds'] = array();
@@ -153,7 +171,10 @@ final class BackupStepRunner implements BackupStepRunnerInterface
             ? (int) $payload['database_primary_key_upper_bounds'][$table]
             : null;
 
-        $plan = $this->chunk_planner->plan($schema, $chunk_size, $chunk_number, $last_seen_id, $upper_bound);
+        // The previous plan also has the cursor for jobs started with the old fixed offset size.
+        $previous = $payload['database_plans_by_table'][$table][$chunk_number - 2] ?? array();
+        $offset = isset($previous['offset'], $previous['limit']) ? (int) $previous['offset'] + (int) $previous['limit'] : null;
+        $plan = $this->chunk_planner->plan($schema, $chunk_size, $chunk_number, $last_seen_id, $upper_bound, $offset);
         $rows = $this->database->fetchRows($plan, $columns);
         $sql = $chunk_number === 1 ? $this->formatter->formatSchema($schema) : '';
         $sql .= $this->formatter->formatRows($rows);
@@ -162,6 +183,7 @@ final class BackupStepRunner implements BackupStepRunnerInterface
         $step_rows = count($rows->rows());
         $payload['database_last_step_seconds'] = $step_seconds;
         $payload['database_last_step_rows'] = $step_rows;
+        $payload['database_last_step_bytes'] = strlen($sql);
         $payload['database_rows_per_second'] = $step_rows / $step_seconds;
         $payload['backup_bottleneck'] = (new BackupPerformanceMetrics())->bottleneck($payload);
 
@@ -181,7 +203,7 @@ final class BackupStepRunner implements BackupStepRunnerInterface
         $table_complete = $step_rows < $chunk_size;
 
         if ($table_complete) {
-            unset($payload['database_columns'][$table]);
+            unset($payload['database_columns'][$table], $payload['database_retry_ceiling']);
             $payload['database_table_index'] = $table_index + 1;
             $payload['database_chunk_number'] = 1;
             $payload['database_last_seen_id'] = null;
@@ -192,7 +214,32 @@ final class BackupStepRunner implements BackupStepRunnerInterface
             $payload['message'] = 'Exported chunk ' . $chunk_number . ' of ' . $chunk_count . ' for table ' . $table . '.';
         }
 
+        unset($payload['database_attempt_limit']);
         return $this->save($job->id(), Job::EXPORTING_DATABASE, $payload);
+    }
+
+    private function trackDatabaseAttempt(string $job_id, string $table, int $chunk, int $limit): void
+    {
+        $this->database_attempt_context = array('job_id' => $job_id, 'table' => $table, 'chunk' => $chunk, 'row_limit' => $limit);
+        $this->database_error_reserve = str_repeat(' ', 32768);
+        if ($this->database_diagnostics_registered) {
+            return;
+        }
+
+        $this->database_diagnostics_registered = true;
+        register_shutdown_function(function (): void {
+            $this->database_error_reserve = '';
+            $error = error_get_last();
+            if ($this->database_attempt_context === null || $error === null
+                || !in_array($error['type'], array(E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR), true)) {
+                return;
+            }
+            (new ErrorLogLogger())->error('PHP stopped during database export.', $this->database_attempt_context + array(
+                'error' => $error['message'],
+                'file' => $error['file'],
+                'line' => $error['line'],
+            ));
+        });
     }
 
     private function scanFiles(Job $job): Job
@@ -260,7 +307,7 @@ final class BackupStepRunner implements BackupStepRunnerInterface
         if (!empty($payload['validation_errors'])) {
             $payload['archive_validation_status'] = 'invalid';
             $payload['archive_validation_errors'] = array_values(array_unique((array) $payload['validation_errors']));
-            $payload['message'] = 'Backup archive validation failed.';
+            $payload['message'] = 'Backup archive validation failed: ' . $payload['archive_validation_errors'][0];
 
             return $this->save($job->id(), Job::FAILED, $payload);
         }
@@ -288,7 +335,14 @@ final class BackupStepRunner implements BackupStepRunnerInterface
             }
         }
         $completed = $this->save($job_id, Job::COMPLETED, $payload);
-        $this->cleanSuccessfulBackupRetention($payload);
+        try {
+            $this->cleanSuccessfulBackupRetention($payload);
+        } catch (Throwable $throwable) {
+            (new ErrorLogLogger())->warning('Backup retention cleanup failed.', array(
+                'job_id' => $job_id,
+                'error' => $throwable->getMessage(),
+            ));
+        }
 
         return $completed;
     }
@@ -323,7 +377,7 @@ final class BackupStepRunner implements BackupStepRunnerInterface
         }
 
         $path = rtrim($this->stringPayload($payload, 'database_directory'), '/\\') . '/tables.json';
-        $this->writeFile($path, (string) json_encode($this->manifest_builder->build($schemas, $plans_by_table), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+        $this->writeFile($path, json_encode($this->manifest_builder->build($schemas, $plans_by_table), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
     }
 
     private function save(string $job_id, string $state, array $payload): Job
@@ -394,18 +448,6 @@ final class BackupStepRunner implements BackupStepRunnerInterface
         }
 
         return (string) $payload[$key];
-    }
-
-    /**
-     * @param array<string,mixed> $payload
-     */
-    private function intPayload(array $payload, string $key): int
-    {
-        if (!isset($payload[$key]) || (int) $payload[$key] < 1) {
-            throw new RuntimeException('Missing backup payload value: ' . esc_html($key));
-        }
-
-        return (int) $payload[$key];
     }
 
     /**

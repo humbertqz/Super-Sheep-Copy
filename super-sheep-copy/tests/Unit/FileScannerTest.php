@@ -125,7 +125,32 @@ final class FileScannerTest extends TestCase
         $payload = $scanner->scanStep($this->root, array(), 1);
 
         self::assertArrayNotHasKey('file_scan_current_entries', $payload);
-        self::assertArrayHasKey('file_scan_current_index', $payload);
+        self::assertArrayHasKey('file_scan_last_entry', $payload);
+    }
+
+    public function testScanResumesAfterDirectoryChangesAndReplaysUncommittedManifestWrites(): void
+    {
+        $directory = $this->root . '/cursor-fixture';
+        mkdir($directory);
+        foreach (array('a.txt', 'b.txt', 'c.txt') as $name) {
+            file_put_contents($directory . '/' . $name, $name);
+        }
+        $manifest = $this->root . '/cursor.jsonl';
+        $scanner = new FileScanner();
+        $checkpoint = $scanner->scanStep($directory, array('scanned_files_path' => $manifest), 1);
+        unlink($directory . '/a.txt');
+
+        $scanner->scanStep($directory, $checkpoint, 1);
+        file_put_contents($manifest, '{"partial":', FILE_APPEND);
+        $resumed = $scanner->scanStep($directory, $checkpoint, 1);
+        $resumed = $scanner->scanStep($directory, $resumed, 1);
+
+        self::assertTrue($resumed['file_scan_complete']);
+        self::assertSame(3, $resumed['scanned_file_count']);
+        $entries = array_map(static function (string $line): array {
+            return json_decode($line, true, 512, JSON_THROW_ON_ERROR);
+        }, file($manifest));
+        self::assertSame(array('a.txt', 'b.txt', 'c.txt'), array_column($entries, 'relative_path'));
     }
 
     public function testScanStepCanIncludeCacheWhenSettingIsDisabled(): void

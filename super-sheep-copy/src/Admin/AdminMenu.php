@@ -136,11 +136,12 @@ final class AdminMenu
             SUPER_SHEEP_COPY_VERSION
         );
 
+        $script_version = (string) filemtime(SUPER_SHEEP_COPY_DIR . 'assets/admin.js');
         wp_enqueue_script(
             'super-sheep-copy-admin',
             SUPER_SHEEP_COPY_URL . 'assets/admin.js',
             array(),
-            SUPER_SHEEP_COPY_VERSION,
+            SUPER_SHEEP_COPY_VERSION . '-' . $script_version,
             true
         );
         wp_localize_script('super-sheep-copy-admin', 'superSheepCopyAdmin', array(

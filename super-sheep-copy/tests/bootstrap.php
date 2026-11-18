@@ -292,6 +292,49 @@ if (!function_exists('maybe_serialize')) {
     }
 }
 
+if (!function_exists('maybe_unserialize')) {
+    function maybe_unserialize($value)
+    {
+        return is_string($value) ? unserialize($value) : $value;
+    }
+}
+
+final class SscTestJobOptionsWpdb
+{
+    public string $options = 'wp_options';
+    public string $last_error = '';
+    private string $argument = '';
+
+    public function prepare(string $query, string $argument): string
+    {
+        $this->argument = $argument;
+        return $query;
+    }
+
+    public function esc_like(string $value): string
+    {
+        return addcslashes($value, '_%\\');
+    }
+
+    public function get_var(string $query): ?string
+    {
+        $value = $GLOBALS['ssc_test_options'][$this->argument] ?? null;
+        return $value === null ? null : maybe_serialize($value);
+    }
+
+    public function get_results(string $query, string $format): array
+    {
+        $prefix = stripslashes(substr($this->argument, 0, -1));
+        $rows = array();
+        foreach ($GLOBALS['ssc_test_options'] as $name => $value) {
+            if (strpos($name, $prefix) === 0) {
+                $rows[] = array('option_name' => $name, 'option_value' => maybe_serialize($value));
+            }
+        }
+        return $rows;
+    }
+}
+
 if (!function_exists('wp_cache_delete')) {
     function wp_cache_delete(string $key, string $group = ''): bool
     {
@@ -304,6 +347,9 @@ if (!function_exists('wp_cache_delete')) {
 if (!function_exists('update_option')) {
     function update_option(string $name, $value, bool $autoload = true): bool
     {
+        if (!empty($GLOBALS['ssc_test_reject_job_updates']) && strpos($name, 'super_sheep_copy_job_') === 0) {
+            return false;
+        }
         $GLOBALS['ssc_test_options'][$name] = $value;
         return true;
     }

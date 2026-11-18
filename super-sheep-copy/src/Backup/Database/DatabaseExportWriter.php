@@ -46,7 +46,7 @@ final class DatabaseExportWriter
         $manifest = $this->manifest_builder->build($schemas, $plans_by_table);
         $this->writeFile(
             $database_directory . '/tables.json',
-            (string) json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+            json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR)
         );
     }
 

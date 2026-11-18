@@ -16,7 +16,7 @@ final class AdminAssetTest extends TestCase
         self::assertStringContainsString('response.ok', $script);
         self::assertStringContainsString('response.text().then(function (text)', $script);
         self::assertStringContainsString('backupErrorMessage(text)', $script);
-        self::assertStringContainsString("Backup step endpoint returned an HTML error page.", $script);
+        self::assertStringContainsString('WordPress returned an error page. Check the PHP error log for this backup.', $script);
         self::assertStringContainsString('Unable to parse backup step response.', $script);
         self::assertStringContainsString('data-super-sheep-copy-retry-job', $script);
     }

@@ -13,9 +13,11 @@ final class AdaptiveBackupLimitsTest extends TestCase
     {
         $limits = new AdaptiveBackupLimits();
 
-        self::assertSame(10000, $limits->databaseChunkSize(array(
+        self::assertSame(5000, $limits->databaseChunkSize(array(
             'database_adaptive_chunk_size' => 5000,
             'database_last_step_seconds' => 2.0,
+            'database_last_step_rows' => 5000,
+            'database_last_step_bytes' => 256000,
         )));
     }
 
@@ -32,10 +34,30 @@ final class AdaptiveBackupLimitsTest extends TestCase
     {
         $limits = new AdaptiveBackupLimits();
 
-        self::assertSame(10000, $limits->databaseChunkSize(array(
-            'database_adaptive_chunk_size' => 20000,
+        self::assertSame(2500, $limits->databaseChunkSize(array(
+            'database_adaptive_chunk_size' => 5000,
             'database_last_step_seconds' => 20.0,
+            'database_last_step_rows' => 5000,
+            'database_last_step_bytes' => 256000,
         )));
+    }
+
+    public function testDatabaseChunkSizeUsesBytesAndRestartsSmallForEachTable(): void
+    {
+        $limits = new AdaptiveBackupLimits();
+        $payload = array(
+            'database_adaptive_chunk_size' => 1000,
+            'database_last_step_seconds' => 0.5,
+            'database_last_step_rows' => 1000,
+            'database_last_step_bytes' => 16 * 1048576,
+        );
+
+        self::assertSame(250, $limits->databaseChunkSize($payload));
+        self::assertSame(500, $limits->databaseChunkSize($payload, true));
+        $payload['database_attempt_limit'] = 250;
+        self::assertSame(125, $limits->databaseChunkSize($payload));
+        $payload['database_attempt_limit'] = 2;
+        self::assertSame(1, $limits->databaseChunkSize($payload));
     }
 
     public function testFileScanBatchSizeGrowsAfterFastStepWithinCap(): void

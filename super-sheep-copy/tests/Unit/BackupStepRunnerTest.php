@@ -128,6 +128,28 @@ final class BackupStepRunnerTest extends TestCase
         self::assertFileExists($this->root . '/work/backup-123/database/chunks/wp_posts.part002.sql');
     }
 
+    public function testInterruptedOffsetExportResumesWithSmallerBatchAtSavedOffset(): void
+    {
+        $jobs = new BackupStepRunnerJobRepository();
+        $runner = $this->runnerWithPackager($jobs, new BackupStepRunnerPackager(), 100, new BackupStepRunnerNoPrimaryKeyClient());
+        $job = $runner->runStep(new Job('backup-123', 'backup', Job::CREATED, $this->payload()));
+        $job = $runner->runStep($job);
+        $payload = $job->payload();
+        $payload['database_attempt_limit'] = 2;
+        $job = $runner->runStep(new Job($job->id(), 'backup', $job->state(), $payload));
+
+        $second_plan = $job->payload()['database_plans_by_table']['wp_posts'][1];
+        self::assertSame(2, $second_plan['offset']);
+        self::assertSame(1, $second_plan['limit']);
+        self::assertArrayNotHasKey('database_attempt_limit', $job->payload());
+
+        $job = $runner->runStep($job);
+        $third_plan = $job->payload()['database_plans_by_table']['wp_posts'][2];
+        self::assertSame(3, $third_plan['offset']);
+        self::assertSame(1, $third_plan['limit']);
+        self::assertStringContainsString("'More'", file_get_contents($this->root . '/work/backup-123/database/chunks/wp_posts.part003.sql'));
+    }
+
     public function testCompletesFileScanAndPackagingInSeparateSteps(): void
     {
         $jobs = new BackupStepRunnerJobRepository();
@@ -308,7 +330,7 @@ final class BackupStepRunnerTest extends TestCase
         $payload['scanned_files_path'] = $this->root . '/work/backup-123/files.jsonl';
         $payload['scanned_file_count'] = 2;
         mkdir($payload['database_directory'] . '/chunks', 0777, true);
-        file_put_contents($payload['database_directory'] . '/tables.json', '{}');
+        file_put_contents($payload['database_directory'] . '/tables.json', '{"tables":[{"name":"wp_posts","chunks":["wp_posts.part001.sql"]}]}');
         file_put_contents($payload['database_directory'] . '/chunks/wp_posts.part001.sql', 'CREATE TABLE wp_posts;');
         file_put_contents($payload['scanned_files_path'], implode("\n", array(
             json_encode(array('absolute_path' => $this->root . '/site/index.php', 'relative_path' => 'index.php', 'size' => 5, 'symlink' => false)),
@@ -542,11 +564,13 @@ final class BackupStepRunnerNoPrimaryKeyClient implements WpdbClientInterface
 
     public function getRows(string $sql): array
     {
-        if (strpos($sql, 'OFFSET 2') !== false) {
-            return array(array('ID' => 3, 'post_title' => 'Again'), array('ID' => 4, 'post_title' => 'More'));
-        }
-
-        return array(array('ID' => 1, 'post_title' => 'Hello'), array('ID' => 2, 'post_title' => 'World'));
+        preg_match('/LIMIT (\d+) OFFSET (\d+)/', $sql, $pagination);
+        return array_slice(array(
+            array('ID' => 1, 'post_title' => 'Hello'),
+            array('ID' => 2, 'post_title' => 'World'),
+            array('ID' => 3, 'post_title' => 'Again'),
+            array('ID' => 4, 'post_title' => 'More'),
+        ), (int) $pagination[2], (int) $pagination[1]);
     }
 
     public function prepare(string $sql, array $args): string

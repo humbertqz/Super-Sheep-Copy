@@ -66,8 +66,12 @@ final class ScheduledBackupRunner
         add_action(ScheduleEventScheduler::CONTINUE_HOOK, array($this, 'handleContinuationEvent'));
 
         // A normal WordPress request repairs a lost continuation event.
-        if ($this->scheduledRunningBackup() !== null) {
-            $this->events->scheduleContinuation();
+        try {
+            if ($this->scheduledRunningBackup() !== null) {
+                $this->events->scheduleContinuation();
+            }
+        } catch (Throwable $throwable) {
+            $this->logger->error('Unable to check for an interrupted scheduled backup.', $this->exceptionContext($throwable));
         }
     }
 
@@ -79,16 +83,16 @@ final class ScheduledBackupRunner
         }
 
         $run_at = gmdate('c');
-        if ($this->runningBackup() !== null) {
-            $this->schedule_settings->save($settings->withLastRun('skipped', 'A backup is already running.', $run_at));
-            $this->events->scheduleDueEvent($settings, $scheduled_for ?? time());
-            if ($this->scheduledRunningBackup() !== null) {
-                $this->events->scheduleContinuation();
-            }
-            return;
-        }
-
         try {
+            if ($this->runningBackup() !== null) {
+                $this->schedule_settings->save($settings->withLastRun('skipped', 'A backup is already running.', $run_at));
+                $this->events->scheduleDueEvent($settings, $scheduled_for ?? time());
+                if ($this->scheduledRunningBackup() !== null) {
+                    $this->events->scheduleContinuation();
+                }
+                return;
+            }
+
             $this->queueScheduledBackup($settings, $scheduled_for ?? time());
             $this->schedule_settings->save($settings->withLastRun('queued', 'Scheduled backup queued.', $run_at));
         } catch (Throwable $throwable) {
@@ -102,6 +106,16 @@ final class ScheduledBackupRunner
     }
 
     public function handleContinuationEvent(): void
+    {
+        try {
+            $this->runContinuation();
+        } catch (Throwable $throwable) {
+            $this->logger->error('Unable to resume scheduled backup.', $this->exceptionContext($throwable));
+            $this->events->scheduleContinuation();
+        }
+    }
+
+    private function runContinuation(): void
     {
         $job = $this->scheduledRunningBackup();
         if ($job === null) {
