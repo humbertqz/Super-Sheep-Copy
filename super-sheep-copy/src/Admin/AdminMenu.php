@@ -129,11 +129,12 @@ final class AdminMenu
             return;
         }
 
+        $style_version = (string) filemtime(SUPER_SHEEP_COPY_DIR . 'assets/admin.css');
         wp_enqueue_style(
             'super-sheep-copy-admin',
             SUPER_SHEEP_COPY_URL . 'assets/admin.css',
             array(),
-            SUPER_SHEEP_COPY_VERSION
+            SUPER_SHEEP_COPY_VERSION . '-' . $style_version
         );
 
         $script_version = (string) filemtime(SUPER_SHEEP_COPY_DIR . 'assets/admin.js');
@@ -146,6 +147,7 @@ final class AdminMenu
         );
         wp_localize_script('super-sheep-copy-admin', 'superSheepCopyAdmin', array(
             'ajaxUrl' => admin_url('admin-ajax.php'),
+            'pluginVersion' => SUPER_SHEEP_COPY_VERSION,
         ));
     }
 

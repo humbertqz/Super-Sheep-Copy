@@ -5,8 +5,9 @@ declare(strict_types=1);
 
 namespace SuperSheepCopy\Admin;
 
-use SuperSheepCopy\Backup\BackupStepRunnerInterface;
+use SuperSheepCopy\Backup\BackupFailure;
 use SuperSheepCopy\Backup\BackupJobSiteGuard;
+use SuperSheepCopy\Backup\BackupStepRunnerInterface;
 use SuperSheepCopy\Backup\Lock\BackupJobExecutionLockInterface;
 use SuperSheepCopy\Jobs\Job;
 use SuperSheepCopy\Jobs\JobRepositoryInterface;
@@ -52,10 +53,13 @@ final class BackupStepAjaxHandler
         try {
             $owner_token = $this->lock->acquire($job_id);
         } catch (Throwable $throwable) {
-            $this->logger->error('Backup step lock acquisition failed.', $this->exceptionContext($throwable, array('job_id' => $job_id)));
+            $this->logger->error('Backup step lock acquisition failed.', $this->exceptionContext($throwable, array(
+                'job_id' => $job_id,
+                'error_code' => 'BACKUP_REQUEST_HTTP_500',
+            )));
             wp_send_json_error(array(
                 'job_id' => $job_id,
-                'message' => 'Backup could not start: ' . $this->displayError($throwable),
+                'message' => __('The backup step could not start. Try again.', 'super-sheep-copy'),
             ), 500);
             return;
         }
@@ -84,11 +88,10 @@ final class BackupStepAjaxHandler
                 $payload['message'] = 'Backup failed: job belongs to a different site or upload directory.';
                 $payload['error'] = 'Job belongs to a different site or upload directory.';
                 $payload['failed_state'] = $job->state();
+                $payload['updated_at'] = gmdate('c');
                 $job = new Job($job->id(), $job->type(), Job::FAILED, $payload);
                 $this->jobs->save($job);
-                $this->logger->error('Backup job stopped.', array(
-                    'job_id' => $job->id(),
-                    'state' => $payload['failed_state'],
+                $this->logger->error('Backup job stopped.', BackupFailure::context($job) + array(
                     'error' => $payload['error'],
                 ));
             } elseif ($job !== null) {
@@ -104,23 +107,21 @@ final class BackupStepAjaxHandler
                 $job = $this->runner->runStep($job);
                 if ($job->state() === Job::FAILED) {
                     $payload = $job->payload();
-                    $this->logger->error('Backup step failed.', array(
-                        'job_id' => $job->id(),
-                        'state' => isset($payload['failed_state']) && is_scalar($payload['failed_state']) ? (string) $payload['failed_state'] : '',
+                    $this->logger->error('Backup step failed.', BackupFailure::context($job) + array(
                         'error' => isset($payload['error']) && is_scalar($payload['error']) ? (string) $payload['error'] : (isset($payload['message']) ? (string) $payload['message'] : ''),
                     ));
                 }
             }
         } catch (Throwable $throwable) {
             $request_error = $throwable;
-            $context = array('job_id' => $job_id);
+            $context = array('job_id' => $job_id, 'error_code' => 'BACKUP_REQUEST_HTTP_500');
             if ($job instanceof Job) {
-                $context['state'] = $job->state();
                 $payload = $job->payload();
-                $payload['message'] = 'Backup failed: ' . $this->displayError($throwable);
                 $payload['error'] = $throwable->getMessage();
                 $payload['failed_state'] = $job->state();
+                $payload['updated_at'] = gmdate('c');
                 $job = new Job($job->id(), $job->type(), Job::FAILED, $payload);
+                $context = BackupFailure::context($job);
                 try {
                     $this->jobs->save($job);
                 } catch (Throwable $save_error) {
@@ -135,7 +136,7 @@ final class BackupStepAjaxHandler
         if ($job === null) {
             $status_code = $request_error instanceof Throwable ? 500 : 404;
             $message = $request_error instanceof Throwable
-                ? 'Backup failed: ' . $this->displayError($request_error)
+                ? __('The backup step could not start. Try again.', 'super-sheep-copy')
                 : 'Backup job was not found.';
             wp_send_json_error(array('job_id' => $job_id, 'message' => $message), $status_code);
             return;
@@ -152,12 +153,19 @@ final class BackupStepAjaxHandler
         $payload = $job->payload();
         $message = isset($payload['message']) && is_scalar($payload['message']) ? (string) $payload['message'] : '';
 
-        return array(
+        $response = array(
             'job_id' => $job->id(),
             'state' => $job->state(),
             'message' => $message,
             'status' => $this->statusForState($job->state()),
         );
+        if ($job->state() === Job::FAILED) {
+            $failure = BackupFailure::context($job);
+            $response['message'] = BackupFailure::message($failure['error_code']);
+            $response['error_report'] = BackupFailure::report($failure);
+        }
+
+        return $response;
     }
 
     private function statusForState(string $state): string
@@ -183,13 +191,6 @@ final class BackupStepAjaxHandler
         if ($this->jobs instanceof RefreshableJobRepositoryInterface) {
             $this->jobs->refresh();
         }
-    }
-
-    private function displayError(Throwable $throwable): string
-    {
-        $message = trim($throwable->getMessage());
-
-        return substr($message !== '' ? $message : 'An unexpected error occurred.', 0, 500);
     }
 
     /**

@@ -10,11 +10,25 @@ const completed = { status: 200, text: JSON.stringify({ success: true, data: {
     state: 'completed', status: 'completed', message: 'Backup completed.'
 } }) };
 
-async function harness(responses, retry = false) {
+async function harness(responses, retry = false, useClipboard = true) {
     const attributes = { 'data-super-sheep-copy-job-id': 'backup-123', 'data-super-sheep-copy-job-state': 'packaging_archive' };
     const progress = { textContent: '' };
     const state = { textContent: 'packaging_archive' };
     const button = { style: {} };
+    const copyAttributes = {
+        'data-copy-confirmation': 'Error details copied.',
+        'data-copy-prompt': 'Copy these error details.',
+        hidden: ''
+    };
+    const copyButton = {
+        getAttribute: name => copyAttributes[name],
+        setAttribute: (name, value) => { copyAttributes[name] = value; },
+        removeAttribute: name => { delete copyAttributes[name]; },
+        closest: () => row
+    };
+    const copyStatus = { textContent: '' };
+    const copied = [];
+    const prompted = [];
     const timers = [];
     const requests = [];
     const events = {};
@@ -27,12 +41,17 @@ async function harness(responses, retry = false) {
             'input[name="super_sheep_copy_nonce"]': { value: 'nonce' },
             '[data-super-sheep-copy-job-progress-message]': progress,
             '[data-super-sheep-copy-job-state-label]': state,
-            '[data-super-sheep-copy-retry-job]': button
+            '[data-super-sheep-copy-retry-job]': button,
+            '[data-super-sheep-copy-error-report]': copyButton,
+            '[data-super-sheep-copy-copy-status]': copyStatus
         }[selector] || null)
     };
     const window = {
         URLSearchParams,
         ajaxurl: '/wp-admin/admin-ajax.php',
+        superSheepCopyAdmin: { pluginVersion: '0.1.1' },
+        navigator: useClipboard ? { clipboard: { writeText: async report => { copied.push(report); } } } : {},
+        prompt: (message, report) => prompted.push({ message, report }),
         setTimeout: (callback, delay) => timers.push({ callback, delay }),
         fetch: async (url, options) => {
             requests.push(options.body);
@@ -56,7 +75,10 @@ async function harness(responses, retry = false) {
     }
     const settle = () => new Promise(resolve => setImmediate(resolve));
     await settle();
-    return { attributes, progress, state, button, timers, requests, settle };
+    return {
+        attributes, progress, state, button, timers, requests, settle, copyAttributes, copied, prompted, copyStatus,
+        copy: () => events.click({ target: copyButton })
+    };
 }
 
 (async () => {
@@ -85,6 +107,8 @@ async function harness(responses, retry = false) {
     assert.match(paused.progress.textContent, /Use Retry/);
     assert.match(paused.progress.textContent, /PHP error log/);
     assert.equal(paused.button.style.display, '');
+    assert.match(paused.copyAttributes['data-super-sheep-copy-error-report'], /BACKUP_REQUEST_HTTP_503/);
+    assert.equal(paused.copyAttributes.hidden, undefined);
 
     const critical = '<p>Ha habido un error crítico en esta web.</p><p><a href="#">Más información</a></p>';
     const fragment = await harness([{ status: 200, text: critical }, completed]);
@@ -105,6 +129,24 @@ async function harness(responses, retry = false) {
     assert.equal(denied.timers.length, 0);
     assert.match(denied.progress.textContent, /HTTP 403/);
     assert.ok(!denied.progress.textContent.includes('<html'));
+
+    const report = 'Error code: BACKUP_PACKAGING_FAILED\nJob ID: backup-123';
+    const failed = { status: 200, text: JSON.stringify({ success: true, data: {
+        state: 'failed', status: 'failed', message: 'Check available disk space.', error_report: report
+    } }) };
+    const failure = await harness([failed]);
+    assert.equal(failure.progress.textContent, 'Check available disk space.');
+    failure.copy();
+    await failure.settle();
+    assert.deepEqual(failure.copied, [report]);
+    assert.equal(failure.copyStatus.textContent, 'Error details copied.');
+    const manualCopy = await harness([failed], false, false);
+    manualCopy.copy();
+    assert.deepEqual(manualCopy.prompted, [{ message: 'Copy these error details.', report }]);
+
+    const invalidResponse = await harness([{ status: 400, text: 'Private file: /srv/example/wp-config.php' }]);
+    assert.ok(!invalidResponse.progress.textContent.includes('wp-config.php'));
+    assert.ok(!invalidResponse.copyAttributes['data-super-sheep-copy-error-report'].includes('wp-config.php'));
 
     process.stdout.write('Backup browser retry checks passed.\n');
 })().catch(error => { process.stderr.write(error.stack + '\n'); process.exitCode = 1; });

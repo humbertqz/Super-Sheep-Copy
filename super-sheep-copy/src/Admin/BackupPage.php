@@ -6,6 +6,7 @@ declare(strict_types=1);
 
 namespace SuperSheepCopy\Admin;
 
+use SuperSheepCopy\Backup\BackupFailure;
 use SuperSheepCopy\Backup\BackupManagerFactoryInterface;
 use SuperSheepCopy\Backup\BackupMetadataCollectorInterface;
 use SuperSheepCopy\Backup\BackupJobFileCleaner;
@@ -282,10 +283,9 @@ final class BackupPage
             $payload['error'] = 'Job belongs to a different site or upload directory.';
             $payload['failed_state'] = $job->state();
             $payload['updated_at'] = gmdate('c');
-            $this->jobs->save(new Job($job->id(), $job->type(), Job::FAILED, $payload));
-            $this->logger->error('Backup job stopped.', array(
-                'job_id' => $job->id(),
-                'state' => $job->state(),
+            $failed_job = new Job($job->id(), $job->type(), Job::FAILED, $payload);
+            $this->jobs->save($failed_job);
+            $this->logger->error('Backup job stopped.', BackupFailure::context($failed_job) + array(
                 'error' => $payload['error'],
             ));
         }

@@ -61,6 +61,26 @@
         }
     }
 
+    function setErrorReport(row, report) {
+        var button = row.querySelector('[data-super-sheep-copy-error-report]');
+        if (button) {
+            button.setAttribute('data-super-sheep-copy-error-report', report);
+            setHidden(button, !report);
+            row.querySelector('[data-super-sheep-copy-copy-status]').textContent = '';
+        }
+    }
+
+    function requestErrorReport(row, code) {
+        var state = row.getAttribute('data-super-sheep-copy-job-state');
+        return [
+            'Error code: ' + code,
+            'Job ID: ' + row.getAttribute('data-super-sheep-copy-job-id'),
+            'Failed step: ' + (runningStates[state] ? state : 'unknown'),
+            'Time (UTC): ' + new Date().toISOString(),
+            'Plugin version: ' + ((window.superSheepCopyAdmin || {}).pluginVersion || 'unknown')
+        ].join('\n');
+    }
+
     function updateRunningIndicators() {
         var rows = document.querySelectorAll('[data-super-sheep-copy-job-id]');
         var hasRunningJob = false;
@@ -80,7 +100,8 @@
         }
     }
 
-    function showError(row, message) {
+    function showError(row, message, code) {
+        setErrorReport(row, requestErrorReport(row, code));
         row.setAttribute('data-super-sheep-copy-job-state', 'failed');
         row.classList.remove('is-running');
         if (row.cells.length >= 4) {
@@ -114,6 +135,7 @@
     }
 
     function updateRow(row, data) {
+        setErrorReport(row, data.error_report || '');
         row.setAttribute('data-super-sheep-copy-job-state', data.state);
         row.classList.toggle('is-running', !!runningStates[data.state]);
         if (row.cells.length >= 4) {
@@ -140,36 +162,12 @@
         updateRunningIndicators();
     }
 
-    function backupErrorMessage(text) {
-        var payload;
-        try {
-            payload = JSON.parse(text);
-        } catch (error) {
-            return text ? text.slice(0, 500) : '';
-        }
-
-        if (payload && payload.data) {
-            if (typeof payload.data === 'string') {
-                return payload.data;
-            }
-            if (payload.data.message) {
-                return payload.data.message;
-            }
-            if (payload.data.error) {
-                return payload.data.error;
-            }
-        }
-
-        return '';
-    }
-
     function isTransientStepError(error) {
         var message = error && error.message ? error.message : '';
 
         return [408, 429, 500, 502, 503, 504].indexOf(error && error.status) !== -1
             || (error && error.status === 200 && error.htmlResponse)
-            || message.indexOf('Request Timeout') !== -1
-            || message.indexOf('HTTP 500') !== -1
+            || (error && error.timeoutResponse)
             || message.indexOf('Failed to fetch') !== -1
             || message.indexOf('NetworkError') !== -1;
     }
@@ -197,6 +195,7 @@
         }
 
         hideRetry(row);
+        setErrorReport(row, '');
         failures = failures || 0;
         var body = new window.URLSearchParams();
         body.set('action', 'super_sheep_copy_run_backup_step');
@@ -217,12 +216,11 @@
             return response.text().then(function (text) {
                 var htmlResponse = /^\s*<(?:!doctype\b|[a-z][a-z0-9-]*(?:\s|>))/i.test(text);
                 if (!response.ok || htmlResponse) {
-                    var message = htmlResponse
-                        ? 'WordPress returned an error page. Check the PHP error log for this backup.'
-                        : backupErrorMessage(text);
-                    var requestError = new Error('Backup step request failed with HTTP ' + response.status + '.' + (message ? ' ' + message : ''));
+                    var requestError = new Error('Backup step request failed with HTTP ' + response.status + '.');
                     requestError.status = response.status;
                     requestError.htmlResponse = htmlResponse;
+                    requestError.timeoutResponse = /Request Timeout|HTTP 500/i.test(text);
+                    requestError.reportCode = response.ok ? 'BACKUP_REQUEST_UNEXPECTED_RESPONSE' : 'BACKUP_REQUEST_HTTP_' + response.status;
                     throw requestError;
                 }
 
@@ -233,17 +231,12 @@
             try {
                 payload = JSON.parse(text);
             } catch (error) {
-                showError(row, 'Unable to parse backup step response.');
+                showError(row, 'WordPress returned an unreadable response. Use Retry / Continue backup to resume.', 'BACKUP_REQUEST_UNEXPECTED_RESPONSE');
                 return;
             }
 
-            return payload;
-        }).then(function (payload) {
-            if (!payload) {
-                return;
-            }
             if (!payload || !payload.success || !payload.data) {
-                showError(row, 'Backup step failed. Use Retry / Continue backup to resume.');
+                showError(row, 'Backup step failed. Use Retry / Continue backup to resume.', 'BACKUP_REQUEST_FAILED');
                 return;
             }
 
@@ -257,8 +250,9 @@
         }).catch(function (error) {
             if (isTransientStepError(error)) {
                 if (failures >= 6) {
+                    setErrorReport(row, requestErrorReport(row, error.reportCode || 'BACKUP_REQUEST_CONNECTION_FAILED'));
                     showProgressMessage(row, error.htmlResponse
-                        ? error.message + ' Use Retry / Continue backup to resume.'
+                        ? 'WordPress returned an error page. Check the PHP error log for this backup. Use Retry / Continue backup to resume.'
                         : 'The server is still unavailable. Use Retry / Continue backup to resume.');
                     showRetry(row);
                     return;
@@ -270,19 +264,40 @@
                 return;
             }
 
-            showError(row, error.message || 'Backup step failed. Use Retry / Continue backup to resume.');
+            var message = error.status ? error.message + ' ' : '';
+            var nextStep = [401, 403, 404].indexOf(error.status) !== -1
+                ? 'Reload the Backup page before retrying.'
+                : 'Use Retry / Continue backup to resume.';
+            showError(row, message + nextStep, error.reportCode || 'BACKUP_REQUEST_FAILED');
         });
     }
 
     document.addEventListener('click', function (event) {
         var target = event.target;
-        if (!target || !target.getAttribute || !target.getAttribute('data-super-sheep-copy-retry-job')) {
+        if (!target || !target.getAttribute) {
             return;
         }
 
-        var row = target.closest('[data-super-sheep-copy-job-id]');
-        if (row) {
-            runStep(row, true);
+        if (target.getAttribute('data-super-sheep-copy-retry-job')) {
+            runStep(target.closest('[data-super-sheep-copy-job-id]'), true);
+            return;
+        }
+
+        var report = target.getAttribute('data-super-sheep-copy-error-report');
+        if (!report) {
+            return;
+        }
+        var copyManually = function () {
+            window.prompt(target.getAttribute('data-copy-prompt'), report);
+        };
+        var clipboard = window.navigator && window.navigator.clipboard;
+        if (clipboard && clipboard.writeText) {
+            clipboard.writeText(report).then(function () {
+                target.closest('[data-super-sheep-copy-job-id]').querySelector('[data-super-sheep-copy-copy-status]').textContent =
+                    target.getAttribute('data-copy-confirmation');
+            }, copyManually);
+        } else {
+            copyManually();
         }
     });
 

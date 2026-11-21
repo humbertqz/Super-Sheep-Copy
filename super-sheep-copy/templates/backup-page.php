@@ -121,6 +121,12 @@ foreach ($jobs as $job) {
                     $created_date_label = isset($job_created_date_labels[$job->id()]) ? $job_created_date_labels[$job->id()] : '';
                     $is_running_job = isset($running_states[$job->state()]);
                     $progress_message = isset($payload['message']) && is_scalar($payload['message']) ? (string) $payload['message'] : '';
+                    $error_report = '';
+                    if ($job->type() === 'backup' && $job->state() === \SuperSheepCopy\Jobs\Job::FAILED) {
+                        $failure = \SuperSheepCopy\Backup\BackupFailure::context($job);
+                        $progress_message = \SuperSheepCopy\Backup\BackupFailure::message($failure['error_code']);
+                        $error_report = \SuperSheepCopy\Backup\BackupFailure::report($failure);
+                    }
                     $performance_summary = $performance_metrics->summary($payload, $job->state());
                     $package_format = isset($payload['package_format']) && is_scalar($payload['package_format']) ? (string) $payload['package_format'] : '';
                     $is_directory_package = $package_format === 'directory';
@@ -141,8 +147,7 @@ foreach ($jobs as $job) {
                     if ($validation_status === 'valid') {
                         $validation_label = esc_html__('Valid', 'super-sheep-copy');
                     } elseif ($validation_status === 'invalid') {
-                        $validation_errors = isset($payload['archive_validation_errors']) && is_array($payload['archive_validation_errors']) ? implode(' ', array_map('strval', $payload['archive_validation_errors'])) : '';
-                        $validation_label = trim(esc_html__('Invalid', 'super-sheep-copy') . ' ' . $validation_errors);
+                        $validation_label = __('Invalid', 'super-sheep-copy');
                     } else {
                         $validation_label = '';
                     }
@@ -164,7 +169,7 @@ foreach ($jobs as $job) {
                         </td>
                         <td>
                             <div class="super-sheep-copy-progress-stack">
-                                <span data-super-sheep-copy-job-progress-message><?php echo esc_html($progress_message); ?></span>
+                                <span data-super-sheep-copy-job-progress-message aria-live="polite"><?php echo esc_html($progress_message); ?></span>
                                 <?php if ($performance_summary !== '') : ?>
                                     <small><?php echo esc_html($performance_summary); ?></small>
                                 <?php endif; ?>
@@ -213,6 +218,17 @@ foreach ($jobs as $job) {
                                         style="display:none"
                                     <?php endif; ?>
                                 ><?php echo esc_html__('Retry / Continue backup', 'super-sheep-copy'); ?></button>
+                            <?php endif; ?>
+                            <?php if ($job->type() === 'backup' && $job->state() !== \SuperSheepCopy\Jobs\Job::COMPLETED) : ?>
+                                <button
+                                    class="button"
+                                    type="button"
+                                    data-super-sheep-copy-error-report="<?php echo esc_attr($error_report); ?>"
+                                    data-copy-confirmation="<?php echo esc_attr(__('Error details copied.', 'super-sheep-copy')); ?>"
+                                    data-copy-prompt="<?php echo esc_attr(__('Copy these error details to share with support.', 'super-sheep-copy')); ?>"
+                                    <?php echo $error_report === '' ? 'hidden' : ''; ?>
+                                ><?php echo esc_html__('Copy error details', 'super-sheep-copy'); ?></button>
+                                <small data-super-sheep-copy-copy-status role="status"></small>
                             <?php endif; ?>
                             <form method="post" data-super-sheep-copy-delete-job>
                                 <?php echo $nonce_field; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>

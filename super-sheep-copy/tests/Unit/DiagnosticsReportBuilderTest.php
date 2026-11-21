@@ -34,7 +34,16 @@ final class DiagnosticsReportBuilderTest extends TestCase
     public function testBuildReportDoesNotIncludeSecretLikePayloadValues(): void
     {
         $report = (new DiagnosticsReportBuilder())->build('/tmp/backups', array(
+            new Job('backup-older', 'backup', Job::FAILED, array(
+                'updated_at' => '2026-11-18T12:00:00+00:00',
+            )),
+            new Job('backup-latest-failure', 'backup', Job::FAILED, array(
+                'updated_at' => '2026-11-19T12:00:00-06:00',
+                'archive_validation_status' => 'invalid',
+                'message' => 'Checksum mismatch for archive entry: private/path.php',
+            )),
             new Job('backup-123', 'backup', Job::COMPLETED, array(
+                'backup_completed_at' => 1795190400,
                 'db_password' => 'secret-pass',
                 'restore_token' => 'secret-token',
                 'nonce' => 'secret-nonce',
@@ -44,5 +53,11 @@ final class DiagnosticsReportBuilderTest extends TestCase
         self::assertStringNotContainsString('secret-pass', $report);
         self::assertStringNotContainsString('secret-token', $report);
         self::assertStringNotContainsString('secret-nonce', $report);
+        self::assertStringNotContainsString('private/path.php', $report);
+        self::assertStringNotContainsString('backup-older', $report);
+        self::assertStringContainsString('Job ID: backup-latest-failure', $report);
+        self::assertStringContainsString('Error code: BACKUP_ARCHIVE_INVALID', $report);
+        self::assertStringContainsString('Failed step: validating_backup', $report);
+        self::assertStringContainsString('Time (UTC): 2026-11-19T18:00:00+00:00', $report);
     }
 }

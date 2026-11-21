@@ -162,10 +162,15 @@ final class BackupStepAjaxHandlerTest extends TestCase
         self::assertSame(true, $GLOBALS['ssc_test_json_response']['success']);
         self::assertSame(Job::FAILED, $GLOBALS['ssc_test_json_response']['data']['state']);
         self::assertSame('failed', $GLOBALS['ssc_test_json_response']['data']['status']);
-        self::assertSame('Backup failed: archive close timeout', $GLOBALS['ssc_test_json_response']['data']['message']);
+        $response = $GLOBALS['ssc_test_json_response']['data'];
+        self::assertStringContainsString('Check available disk space', $response['message']);
+        self::assertStringContainsString('Error code: BACKUP_PACKAGING_FAILED', $response['error_report']);
+        self::assertStringNotContainsString('archive close timeout', json_encode($response, JSON_THROW_ON_ERROR));
         self::assertSame(Job::PACKAGING_ARCHIVE, $jobs->find('backup-123')->payload()['failed_state']);
         self::assertSame('Backup step failed.', $logger->errors[0]['message']);
         self::assertSame('archive close timeout', $logger->errors[0]['context']['error']);
+        self::assertSame('BACKUP_PACKAGING_FAILED', $logger->errors[0]['context']['error_code']);
+        self::assertStringContainsString('Time (UTC): ' . $logger->errors[0]['context']['failed_at'], $response['error_report']);
         self::assertSame(array(
             'acquire:backup-123',
             'release:backup-123:ajax-owner',
@@ -218,7 +223,8 @@ final class BackupStepAjaxHandlerTest extends TestCase
 
         self::assertNull($runner->receivedJob());
         self::assertSame(Job::FAILED, $GLOBALS['ssc_test_json_response']['data']['state']);
-        self::assertSame('Backup failed: job belongs to a different site or upload directory.', $GLOBALS['ssc_test_json_response']['data']['message']);
+        self::assertStringContainsString('Create a new backup on this site.', $GLOBALS['ssc_test_json_response']['data']['message']);
+        self::assertStringContainsString('Error code: BACKUP_SITE_MISMATCH', $GLOBALS['ssc_test_json_response']['data']['error_report']);
     }
 
     public function testBusyJobReturnsCurrentProgressWithoutRunningStep(): void

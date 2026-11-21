@@ -621,6 +621,10 @@
   margin: 0;
 }
 
+.super-sheep-copy .super-sheep-copy-job-actions button[hidden] {
+  display: none;
+}
+
 .super-sheep-copy .super-sheep-copy-job-date {
   color: #1d2327;
   display: inline-block;

@@ -498,7 +498,7 @@ final class BackupPageTest extends TestCase
         self::assertInstanceOf(Job::class, $job);
         self::assertSame(Job::FAILED, $job->state());
         self::assertSame(Job::EXPORTING_DATABASE, $job->payload()['failed_state']);
-        self::assertStringContainsString('Backup failed: job belongs to a different site or upload directory.', $html);
+        self::assertStringContainsString('This backup belongs to a different site or upload directory. Create a new backup on this site.', $html);
         self::assertStringNotContainsString('class="super-sheep-copy-job-row is-running"', $html);
     }
 
@@ -648,6 +648,9 @@ final class BackupPageTest extends TestCase
 
         self::assertStringContainsString('data-super-sheep-copy-retry-job="backup-123"', $html);
         self::assertStringContainsString('Retry / Continue backup', $html);
+        self::assertStringContainsString('Copy error details', $html);
+        self::assertStringContainsString('Error code: BACKUP_PACKAGING_FAILED', $html);
+        self::assertStringNotContainsString('Backup failed: timeout', $html);
     }
 
     public function testRenderPrunesRestoreJobWhenStagedArchiveIsMissing(): void

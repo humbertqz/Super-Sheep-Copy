@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace SuperSheepCopy\Schedule;
 
+use SuperSheepCopy\Backup\BackupFailure;
 use SuperSheepCopy\Backup\BackupMetadataCollectorInterface;
 use SuperSheepCopy\Backup\BackupOptions;
 use SuperSheepCopy\Backup\BackupStepRunnerInterface;
@@ -169,9 +170,7 @@ final class ScheduledBackupRunner
 
             if ($job->state() === Job::FAILED) {
                 $payload = $job->payload();
-                $this->logger->error('Scheduled backup step failed.', array(
-                    'job_id' => $job->id(),
-                    'state' => isset($payload['failed_state']) && is_scalar($payload['failed_state']) ? (string) $payload['failed_state'] : '',
+                $this->logger->error('Scheduled backup step failed.', BackupFailure::context($job) + array(
                     'error' => isset($payload['error']) && is_scalar($payload['error']) ? (string) $payload['error'] : (isset($payload['message']) ? (string) $payload['message'] : ''),
                 ));
                 $retry_job = $this->retryFailedStep($job);

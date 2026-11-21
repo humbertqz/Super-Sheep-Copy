@@ -5,6 +5,7 @@ declare(strict_types=1);
 
 namespace SuperSheepCopy\Settings;
 
+use SuperSheepCopy\Backup\BackupFailure;
 use SuperSheepCopy\Jobs\Job;
 
 final class DiagnosticsReportBuilder
@@ -37,6 +38,23 @@ final class DiagnosticsReportBuilder
             $lines[] = 'Files changed during backup: ' . (isset($payload['archive_changed_file_count']) ? (string) (int) $payload['archive_changed_file_count'] : '0');
         } else {
             $lines[] = 'Last backup: none';
+        }
+
+        $latest_failure = null;
+        foreach ($jobs as $job) {
+            if (!$job instanceof Job || $job->type() !== 'backup' || $job->state() !== Job::FAILED) {
+                continue;
+            }
+            $failure = BackupFailure::context($job);
+            if ($latest_failure === null || ($failure['failed_at'] !== 'unknown'
+                && ($latest_failure['failed_at'] === 'unknown' || $failure['failed_at'] > $latest_failure['failed_at']))) {
+                $latest_failure = $failure;
+            }
+        }
+        if ($latest_failure !== null) {
+            $lines[] = '';
+            $lines[] = 'Most recent backup failure';
+            $lines[] = BackupFailure::report($latest_failure);
         }
 
         return implode("\n", $lines) . "\n";
